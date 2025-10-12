@@ -1,39 +1,188 @@
-import { detectPii, DetectionResult } from "@/shared/pii-detector";
+import { detectPii, DetectionResult, PiiType } from "@/shared/pii-detector";
+import { useState } from "react";
 import ReactDOM from "react-dom/client";
 import type { Root } from "react-dom/client";
 
 // Simple warning badge component without MUI dependencies
-function SimpleWarningBadge({ detections }: { detections: DetectionResult[] }) {
+function SimpleWarningBadge({ 
+  detections,
+  onAnonymize,
+  onPopupStateChange
+}: { 
+  detections: DetectionResult[];
+  onAnonymize: (detections: DetectionResult[]) => void;
+  onPopupStateChange: (isOpen: boolean) => void;
+}) {
+  const [showPopup, setShowPopup] = useState(false);
   const tooltipText = `PII Detected: ${detections.map((d) => d.type).join(", ")}`;
   
+  const handleTogglePopup = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newState = !showPopup;
+    setShowPopup(newState);
+    onPopupStateChange(newState);
+  };
+
+  const handleAnonymizeClick = (detection: DetectionResult) => {
+    onAnonymize([detection]);
+    setShowPopup(false);
+    onPopupStateChange(false);
+  };
+
+  const handleAnonymizeAll = () => {
+    onAnonymize(detections);
+    setShowPopup(false);
+    onPopupStateChange(false);
+  };
+  
   return (
-    <div
-      title={tooltipText}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: "28px",
-        height: "28px",
-        backgroundColor: "#fff3cd",
-        border: "2px solid #ffc107",
-        borderRadius: "50%",
-        cursor: "pointer",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-      }}
-    >
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
+    <div style={{ position: "relative" }}>
+      <div
+        title={tooltipText}
+        onClick={handleTogglePopup}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "28px",
+          height: "28px",
+          backgroundColor: "#fff3cd",
+          border: "2px solid #ffc107",
+          borderRadius: "50%",
+          cursor: "pointer",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+        }}
       >
-        <path
-          d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"
-          fill="#ff9800"
-        />
-      </svg>
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"
+            fill="#ff9800"
+          />
+        </svg>
+      </div>
+      
+      {showPopup && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: "0",
+            marginTop: "8px",
+            backgroundColor: "white",
+            border: "1px solid #ddd",
+            borderRadius: "8px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            padding: "12px",
+            minWidth: "280px",
+            maxWidth: "400px",
+            zIndex: 2147483647,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            fontSize: "14px",
+          }}
+        >
+          <div style={{ 
+            fontWeight: "600", 
+            marginBottom: "12px",
+            fontSize: "16px",
+            color: "#333"
+          }}>
+            ⚠️ PII Detected
+          </div>
+          
+          <div style={{ maxHeight: "300px", overflowY: "auto" }}>
+            {detections.map((d, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: "10px",
+                  marginBottom: "8px",
+                  backgroundColor: "#f8f9fa",
+                  borderRadius: "6px",
+                  border: "1px solid #e9ecef",
+                }}
+              >
+                <div style={{ 
+                  fontWeight: "600", 
+                  color: "#ff9800",
+                  marginBottom: "6px",
+                  fontSize: "12px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px"
+                }}>
+                  {d.type.replace(/_/g, " ")}
+                </div>
+                <div style={{ 
+                  marginBottom: "8px",
+                  color: "#666",
+                  wordBreak: "break-all",
+                  fontFamily: "monospace",
+                  fontSize: "13px",
+                  padding: "6px",
+                  backgroundColor: "white",
+                  borderRadius: "4px"
+                }}>
+                  {d.value}
+                </div>
+                <button
+                  onClick={() => handleAnonymizeClick(d)}
+                  style={{
+                    backgroundColor: "#ff9800",
+                    color: "white",
+                    border: "none",
+                    padding: "6px 12px",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    fontWeight: "500",
+                    width: "100%",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = "#f57c00";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = "#ff9800";
+                  }}
+                >
+                  Anonymize This
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {detections.length > 1 && (
+            <button
+              onClick={handleAnonymizeAll}
+              style={{
+                backgroundColor: "#d32f2f",
+                color: "white",
+                border: "none",
+                padding: "8px 16px",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "14px",
+                fontWeight: "600",
+                width: "100%",
+                marginTop: "8px",
+              }}
+              onMouseEnter={(e) => {
+                (e.target as HTMLButtonElement).style.backgroundColor = "#c62828";
+              }}
+              onMouseLeave={(e) => {
+                (e.target as HTMLButtonElement).style.backgroundColor = "#d32f2f";
+              }}
+            >
+              Anonymize All ({detections.length})
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -45,6 +194,7 @@ export default defineContentScript({
     let activeInput: HTMLInputElement | HTMLTextAreaElement | null = null;
     let badgeContainer: HTMLDivElement | null = null;
     let badgeRoot: Root | null = null;
+    let isPopupOpen = false; // Track popup state
 
     const isValidInput = (
       element: Element,
@@ -69,6 +219,62 @@ export default defineContentScript({
       return false;
     };
 
+    const anonymizeValue = (detection: DetectionResult): string => {
+      switch (detection.type) {
+        case PiiType.CreditCard:
+          // Show last 4 digits
+          const cleaned = detection.value.replace(/\s/g, "");
+          const last4 = cleaned.slice(-4);
+          const masked = "•".repeat(cleaned.length - 4);
+          // Preserve original spacing format
+          if (detection.value.includes(" ")) {
+            return masked.match(/.{1,4}/g)?.join(" ") + " " + last4 || detection.value;
+          }
+          return masked + last4;
+        
+        case PiiType.Email:
+          const [user, domain] = detection.value.split("@");
+          if (!user || !domain) return "[REDACTED]";
+          const maskedUser = user[0] + "•".repeat(Math.max(user.length - 1, 2));
+          return `${maskedUser}@${domain}`;
+        
+        case PiiType.SSN:
+          // Show last 4 digits: XXX-XX-1234
+          return detection.value.replace(/\d(?=\d{4})/g, "•");
+        
+        case PiiType.PhoneNumber:
+          // Show last 4 digits
+          return detection.value.replace(/\d(?=\d{4})/g, "•");
+        
+        default:
+          return "[REDACTED]";
+      }
+    };
+
+    const handleAnonymize = (detections: DetectionResult[]) => {
+      if (!activeInput) return;
+
+      let newValue = activeInput.value;
+      
+      // Sort detections by position (if we track it) or by length (longest first)
+      // to avoid replacing substrings incorrectly
+      const sortedDetections = [...detections].sort((a, b) => b.value.length - a.value.length);
+      
+      sortedDetections.forEach((d) => {
+        const anonymized = anonymizeValue(d);
+        newValue = newValue.replace(d.value, anonymized);
+      });
+
+      activeInput.value = newValue;
+      
+      // Trigger input event so form validation updates
+      activeInput.dispatchEvent(new Event("input", { bubbles: true }));
+      
+      // Re-scan to update detections (should now show anonymized values)
+      const results = detectPii(newValue);
+      handleDetection(results);
+    };
+
     const createBadgeContainer = (
       input: HTMLInputElement | HTMLTextAreaElement,
     ): HTMLDivElement => {
@@ -91,11 +297,9 @@ export default defineContentScript({
         isolation: isolate !important;
       `;
 
-      // Find wrapper with input-wrapper class or create positioning context
       let targetParent = input.parentElement;
-
-      // Look for the input-wrapper or text-input-wrapper
       let current = input.parentElement;
+      
       while (current && current !== document.body) {
         const classList = current.classList;
         if (
@@ -115,7 +319,6 @@ export default defineContentScript({
         current = current.parentElement;
       }
 
-      // Make sure target parent has position relative
       if (targetParent) {
         const parentStyle = window.getComputedStyle(targetParent);
         if (parentStyle.position === "static") {
@@ -123,20 +326,12 @@ export default defineContentScript({
         }
 
         targetParent.appendChild(container);
-        console.log(
-          "Badge container created and appended to:",
-          targetParent,
-          "with classes:",
-          targetParent.className,
-        );
       } else {
-        // Fallback: append to body with fixed positioning
         container.style.position = "fixed !important";
         const rect = input.getBoundingClientRect();
         container.style.top = `${rect.top + 8}px !important`;
         container.style.left = `${rect.right - 40}px !important`;
         document.body.appendChild(container);
-        console.log("Badge container appended to body (fallback)");
       }
 
       return container;
@@ -146,32 +341,32 @@ export default defineContentScript({
       if (detections.length > 0 && activeInput) {
         if (!badgeContainer) {
           badgeContainer = createBadgeContainer(activeInput);
-
-          // Force a reflow before rendering React
           badgeContainer.offsetHeight;
 
           badgeRoot = ReactDOM.createRoot(badgeContainer);
-          badgeRoot.render(<SimpleWarningBadge detections={detections} />);
-
-          // Double check visibility after render
-          setTimeout(() => {
-            if (badgeContainer) {
-              console.log("Badge container after render:", {
-                visible:
-                  badgeContainer.offsetWidth > 0 &&
-                  badgeContainer.offsetHeight > 0,
-                display: window.getComputedStyle(badgeContainer).display,
-                opacity: window.getComputedStyle(badgeContainer).opacity,
-                zIndex: window.getComputedStyle(badgeContainer).zIndex,
-                rect: badgeContainer.getBoundingClientRect(),
-                innerHTML: badgeContainer.innerHTML.substring(0, 200),
-              });
-            }
-          }, 100);
+          badgeRoot.render(
+            <SimpleWarningBadge 
+              detections={detections}
+              onAnonymize={handleAnonymize}
+              onPopupStateChange={(isOpen) => {
+                isPopupOpen = isOpen;
+                console.log("Popup state changed:", isOpen);
+              }}
+            />
+          );
 
           console.log("Badge rendered with detections:", detections);
         } else if (badgeRoot) {
-          badgeRoot.render(<SimpleWarningBadge detections={detections} />);
+          badgeRoot.render(
+            <SimpleWarningBadge 
+              detections={detections}
+              onAnonymize={handleAnonymize}
+              onPopupStateChange={(isOpen) => {
+                isPopupOpen = isOpen;
+                console.log("Popup state changed:", isOpen);
+              }}
+            />
+          );
         }
       } else {
         removeBadge();
@@ -187,6 +382,7 @@ export default defineContentScript({
         badgeContainer.remove();
         badgeContainer = null;
       }
+      isPopupOpen = false;
     };
 
     const getInputValue = (
@@ -222,7 +418,6 @@ export default defineContentScript({
       }
     };
 
-    // Handle focus events
     document.addEventListener(
       "focusin",
       (event) => {
@@ -230,19 +425,13 @@ export default defineContentScript({
 
         if (!isValidInput(target)) return;
 
-        // Remove previous badge if exists
         removeBadge();
 
         activeInput = target as HTMLInputElement | HTMLTextAreaElement;
-
-        console.log("Input focused:", activeInput);
-
-        // Perform an immediate scan on focus
         const currentValue = getInputValue(activeInput);
         const results = detectPii(currentValue);
         handleDetection(results);
 
-        // Attach input listener
         attachInputListener(activeInput);
       },
       true,
@@ -253,14 +442,23 @@ export default defineContentScript({
       (event) => {
         const relatedTarget = event.relatedTarget as Node;
 
-        // Don't remove if focus moved to the badge
-        if (badgeContainer?.contains(relatedTarget)) {
+        // Don't remove if focus moved to the badge or popup is open
+        if (badgeContainer?.contains(relatedTarget) || isPopupOpen) {
+          console.log("Keeping badge - popup is open or focus in badge");
           return;
         }
 
         // Delay to handle rapid focus changes
         setTimeout(() => {
           const currentFocus = document.activeElement;
+          
+          // Don't remove if popup is still open
+          if (isPopupOpen) {
+            console.log("Keeping badge - popup still open after delay");
+            return;
+          }
+          
+          // Don't remove if focus returned to our input
           if (currentFocus !== activeInput) {
             removeBadge();
             activeInput = null;
@@ -270,7 +468,27 @@ export default defineContentScript({
       true,
     );
 
-    // Cleanup on unload
+    // Close popup if user clicks outside
+    document.addEventListener("mousedown", (event) => {
+      if (isPopupOpen && badgeContainer && !badgeContainer.contains(event.target as Node)) {
+        // User clicked outside the popup, close it
+        isPopupOpen = false;
+        if (badgeRoot) {
+          const currentValue = getInputValue(activeInput!);
+          const results = detectPii(currentValue);
+          badgeRoot.render(
+            <SimpleWarningBadge 
+              detections={results}
+              onAnonymize={handleAnonymize}
+              onPopupStateChange={(isOpen) => {
+                isPopupOpen = isOpen;
+              }}
+            />
+          );
+        }
+      }
+    });
+
     ctx.onInvalidated(() => {
       removeBadge();
     });
