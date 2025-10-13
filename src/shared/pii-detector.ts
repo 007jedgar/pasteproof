@@ -1,104 +1,153 @@
-// src/shared/pii-detector.ts
+export type PiiType =
+  | 'CREDIT_CARD'
+  | 'SSN'
+  | 'EMAIL'
+  | 'PHONE'
+  | 'API_KEY'
+  | 'IP_ADDRESS'
+  | 'CUSTOM'; // For user-defined patterns
 
-export enum PiiType {
-  CreditCard = 'Credit Card',
-  SSN = 'Social Security Number',
-  PhoneNumber = 'Phone Number',
-  Email = 'Email Address',
-  APIKey = 'API Key',
-}
-
-export interface DetectionResult {
-  type: PiiType;
+export type DetectionResult = {
+  type: PiiType | string; // Allow custom type names
   value: string;
-  startIndex: number;
-}
+  start?: number;
+  end?: number;
+};
 
-function luhnCheck(numStr: string): boolean {
-  if (/[^0-9-\s]+/.test(numStr)) return false;
+export type CustomPattern = {
+  id: string;
+  name: string;
+  pattern: string;
+  pattern_type: string;
+  description?: string;
+  is_active: number;
+};
+
+// Built-in patterns
+const BUILT_IN_PATTERNS: Array<{
+  type: PiiType;
+  regex: RegExp;
+  validate?: (value: string) => boolean;
+}> = [
+  {
+    type: 'CREDIT_CARD',
+    regex: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g,
+    validate: luhnCheck,
+  },
+  {
+    type: 'SSN',
+    regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+  },
+  {
+    type: 'EMAIL',
+    regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+  },
+  {
+    type: 'PHONE',
+    regex: /\b(\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g,
+  },
+  {
+    type: 'API_KEY',
+    regex:
+      /\b(?:api[_-]?key|token|secret)[_-]?[:\s]*['"]*([a-zA-Z0-9_\-]{20,})['"]*\b/gi,
+  },
+  {
+    type: 'IP_ADDRESS',
+    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+  },
+];
+
+// Store custom patterns (fetched from API)
+let customPatterns: CustomPattern[] = [];
+
+// Luhn algorithm for credit card validation
+function luhnCheck(cardNumber: string): boolean {
+  const digits = cardNumber.replace(/\D/g, '');
+  if (digits.length < 13 || digits.length > 19) return false;
 
   let sum = 0;
-  let shouldDouble = false;
-  // Iterate from right to left
-  for (let i = numStr.length - 1; i >= 0; i--) {
-    const char = numStr.charAt(i);
-    if (char === ' ' || char === '-') continue;
+  let isEven = false;
 
-    let digit = parseInt(char, 10);
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let digit = parseInt(digits[i]);
 
-    if (shouldDouble) {
+    if (isEven) {
       digit *= 2;
-      if (digit > 9) {
-        digit -= 9;
-      }
+      if (digit > 9) digit -= 9;
     }
 
     sum += digit;
-    shouldDouble = !shouldDouble;
+    isEven = !isEven;
   }
+
   return sum % 10 === 0;
 }
 
+// Set custom patterns (called after fetching from API)
+export function setCustomPatterns(patterns: CustomPattern[]) {
+  customPatterns = patterns.filter(p => p.is_active === 1);
+  console.log(`Loaded ${customPatterns.length} custom patterns`);
+}
+
+// Get current custom patterns
+export function getCustomPatterns(): CustomPattern[] {
+  return customPatterns;
+}
+
+// Main detection function
 export function detectPii(text: string): DetectionResult[] {
+  if (!text || text.length === 0) return [];
+
   const results: DetectionResult[] = [];
 
-  // Credit Card Detection (with Luhn validation)
-  const ccRegex = /(?:\d[ -]*){13,19}/g; 
-  for (const match of text.matchAll(ccRegex)) {
-    const cleaned = match[0].replace(/[\s-]/g, '');
-    
-    if (cleaned.length >= 13 && cleaned.length <= 16 && luhnCheck(cleaned)) {
+  // Check built-in patterns
+  for (const pattern of BUILT_IN_PATTERNS) {
+    const matches = text.matchAll(pattern.regex);
+
+    for (const match of matches) {
+      const value = match[0];
+
+      // Skip if validation function exists and fails
+      if (pattern.validate && !pattern.validate(value)) {
+        continue;
+      }
+
       results.push({
-        type: PiiType.CreditCard,
-        value: match[0],
-        startIndex: match.index!,
+        type: pattern.type,
+        value,
+        start: match.index,
+        end: match.index ? match.index + value.length : undefined,
       });
     }
   }
 
-  // SSN Detection (with basic validation)
-  const ssnRegex = /\b\d{3}-\d{2}-\d{4}\b/g;
-  for (const match of text.matchAll(ssnRegex)) {
-     // Basic validation: Not all zeros, not 666, etc.
-    if (!match[0].startsWith('000') && !match[0].startsWith('666')) {
+  // Check custom patterns
+  for (const customPattern of customPatterns) {
+    try {
+      const regex = new RegExp(customPattern.pattern, 'gi');
+      const matches = text.matchAll(regex);
+
+      for (const match of matches) {
+        const value = match[0];
+
         results.push({
-            type: PiiType.SSN,
-            value: match[0],
-            startIndex: match.index!,
+          type: customPattern.pattern_type,
+          value,
+          start: match.index,
+          end: match.index ? match.index + value.length : undefined,
         });
+      }
+    } catch (error) {
+      console.error(`Invalid custom pattern: ${customPattern.name}`, error);
     }
   }
 
-  // Phone Number Detection (US/CA)
-  const phoneRegex = /\b(?:\+?1[ -]?)?\(?\d{3}\)?[ -]?\d{3}[ -]?\d{4}\b/g;
-  for (const match of text.matchAll(phoneRegex)) {
-    results.push({
-      type: PiiType.PhoneNumber,
-      value: match[0],
-      startIndex: match.index!,
-    });
-  }
+  // Remove duplicates (same value and type)
+  const uniqueResults = results.filter(
+    (result, index, self) =>
+      index ===
+      self.findIndex(r => r.type === result.type && r.value === result.value)
+  );
 
-  // Email Detection
-  const emailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
-  for (const match of text.matchAll(emailRegex)) {
-    results.push({
-      type: PiiType.Email,
-      value: match[0],
-      startIndex: match.index!,
-    });
-  }
-
-  // API Key Detection (common prefixes)
-  const apiKeyRegex = /\b(sk|pk|rk)_(test|live)_[a-zA-Z0-9]{24,}\b/g;
-   for (const match of text.matchAll(apiKeyRegex)) {
-    results.push({
-      type: PiiType.APIKey,
-      value: match[0],
-      startIndex: match.index!,
-    });
-  }
-
-  return results;
+  return uniqueResults;
 }
-

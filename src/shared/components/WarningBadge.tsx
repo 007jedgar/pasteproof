@@ -9,7 +9,7 @@ interface WarningBadgeProps {
 export default function WarningBadge({ detections }: WarningBadgeProps) {
   // Create a summary of what was detected for the tooltip
   const tooltipTitle = `PII Detected: ${detections
-    .map((d) => d.type)
+    .map(d => d.type)
     .join(', ')}`;
 
   return (

@@ -5,13 +5,15 @@ export default defineConfig({
   srcDir: 'src',
   manifest: {
     name: 'Paste Proof',
-    description: 'Your pasteboard bodyguard. Prevents you from pasting sensitive data into the wrong fields.',
+    description:
+      'Your pasteboard bodyguard. Prevents you from pasting sensitive data into the wrong fields.',
     version: '0.1.0',
     permissions: [
       'storage', // For storing user settings
       'activeTab', // Required for some interactions
     ],
     host_permissions: [
+      'http://localhost:8787/*',
       '<all_urls>', // Allows content scripts to run on all websites
     ],
     action: {
