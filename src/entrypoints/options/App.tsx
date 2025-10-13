@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { initializeApiClient, getApiClient } from '@/shared/api-client';
 import { CustomPattern } from '@/shared/pii-detector';
 
+
 export default function OptionsApp() {
   const [apiKey, setApiKey] = useState('');
   const [savedApiKey, setSavedApiKey] = useState('');
@@ -162,7 +163,7 @@ export default function OptionsApp() {
           onChange={e => setApiKey(e.target.value)}
           placeholder="pk_test_..."
           style={{
-            width: '100%',
+            width: '90%',
             padding: '10px',
             fontSize: '14px',
             border: '1px solid #ddd',
@@ -216,7 +217,7 @@ export default function OptionsApp() {
                 setNewPattern({ ...newPattern, name: e.target.value })
               }
               style={{
-                width: '100%',
+                width: '90%',
                 padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
@@ -233,7 +234,7 @@ export default function OptionsApp() {
                 setNewPattern({ ...newPattern, pattern: e.target.value })
               }
               style={{
-                width: '100%',
+                width: '90%',
                 padding: '10px',
                 fontSize: '14px',
                 fontFamily: 'monospace',
@@ -254,7 +255,7 @@ export default function OptionsApp() {
                 })
               }
               style={{
-                width: '100%',
+                width: '90%',
                 padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
@@ -270,7 +271,7 @@ export default function OptionsApp() {
                 setNewPattern({ ...newPattern, description: e.target.value })
               }
               style={{
-                width: '100%',
+                width: '90%',
                 padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
