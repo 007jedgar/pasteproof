@@ -3,6 +3,7 @@ import {
   DetectionResult,
   setCustomPatterns,
   getCustomPatterns,
+  PiiType,
 } from '@/shared/pii-detector';
 import { useState } from 'react';
 import ReactDOM from 'react-dom/client';
@@ -246,7 +247,7 @@ export default defineContentScript({
 
     const anonymizeValue = (detection: DetectionResult): string => {
       switch (detection.type) {
-        case PiiType.CreditCard:
+        case 'CREDIT_CARD':
           // Show last 4 digits
           const cleaned = detection.value.replace(/\s/g, '');
           const last4 = cleaned.slice(-4);
@@ -260,17 +261,17 @@ export default defineContentScript({
           }
           return masked + last4;
 
-        case PiiType.Email:
+        case 'EMAIL':
           const [user, domain] = detection.value.split('@');
           if (!user || !domain) return '[REDACTED]';
           const maskedUser = user[0] + '•'.repeat(Math.max(user.length - 1, 2));
           return `${maskedUser}@${domain}`;
 
-        case PiiType.SSN:
+        case 'SSN':
           // Show last 4 digits: XXX-XX-1234
           return detection.value.replace(/\d(?=\d{4})/g, '•');
 
-        case PiiType.PhoneNumber:
+        case 'PHONE':
           // Show last 4 digits
           return detection.value.replace(/\d(?=\d{4})/g, '•');
 
