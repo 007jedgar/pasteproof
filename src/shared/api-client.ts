@@ -41,6 +41,14 @@ export type DashboardStats = {
   detections_by_day: Array<{ date: string; count: number }>;
 };
 
+export type WhitelistSite = {
+  id: string;
+  user_id: string;
+  domain: string;
+  is_active: number;
+  created_at: number;
+};
+
 export class PasteProofApiClient {
   private apiKey: string;
   private baseUrl: string;
@@ -73,6 +81,36 @@ export class PasteProofApiClient {
     }
 
     return response.json();
+  }
+
+    // Whitelist methods
+  async getWhitelist(): Promise<WhitelistSite[]> {
+    const data = await this.fetch<{ whitelist: WhitelistSite[] }>('/api/whitelist');
+    return data.whitelist;
+  }
+
+  async addToWhitelist(domain: string): Promise<WhitelistSite> {
+    const data = await this.fetch<{ success: boolean; whitelist: WhitelistSite }>(
+      '/api/whitelist',
+      {
+        method: 'POST',
+        body: JSON.stringify({ domain }),
+      }
+    );
+    return data.whitelist;
+  }
+
+  async removeFromWhitelist(whitelistId: string): Promise<void> {
+    await this.fetch(`/api/whitelist/${whitelistId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async isWhitelisted(domain: string): Promise<boolean> {
+    const data = await this.fetch<{ whitelisted: boolean; domain: string }>(
+      `/api/whitelist/check/${encodeURIComponent(domain)}`
+    );
+    return data.whitelisted;
   }
 
     // AI Context Analysis

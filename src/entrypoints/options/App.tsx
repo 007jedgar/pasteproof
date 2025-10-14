@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { initializeApiClient, getApiClient } from '@/shared/api-client';
+import { initializeApiClient, getApiClient, WhitelistSite } from '@/shared/api-client';
 import { CustomPattern } from '@/shared/pii-detector';
 import Dashboard from './Dashboard';
 
@@ -10,16 +10,19 @@ export default function OptionsApp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+  const [whitelist, setWhitelist] = useState<WhitelistSite[]>([]);
+  const [newDomain, setNewDomain] = useState('');
+
   // Get initial tab from URL hash
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '');
     if (hash === 'dashboard') return 'dashboard';
     if (hash === 'patterns') return 'patterns';
+    if (hash === 'whitelist') return 'whitelist';
     return 'settings';
   };
 
-  const [activeTab, setActiveTab] = useState<"settings" | "patterns" | "dashboard">(getInitialTab());
+  const [activeTab, setActiveTab] = useState<"settings" | "whitelist" | "patterns" | "dashboard">(getInitialTab());
 
   // Form for new pattern
   const [newPattern, setNewPattern] = useState({
@@ -51,16 +54,74 @@ export default function OptionsApp() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const loadSettings = async () => {
-    const result = await browser.storage.local.get('apiKey');
-    const key = result.apiKey as string | undefined;
+const loadWhitelist = async (key: string) => {
+  try {
+    const client = initializeApiClient(key);
+    const sites = await client.getWhitelist();
+    setWhitelist(sites);
+  } catch (err) {
+    console.error('Failed to load whitelist:', err);
+  }
+};
 
-    if (key) {
-      setApiKey(key);
-      setSavedApiKey(key);
-      await loadPatterns(key);
+// Add to loadSettings
+const loadSettings = async () => {
+  const result = await browser.storage.local.get('apiKey');
+  const key = result.apiKey as string | undefined;
+
+  if (key) {
+    setApiKey(key);
+    setSavedApiKey(key);
+    await Promise.all([
+      loadPatterns(key),
+      loadWhitelist(key)
+    ]);
+  }
+};
+
+// Add domain to whitelist
+const addDomain = async () => {
+  try {
+    setLoading(true);
+    setError('');
+
+    const client = getApiClient();
+    if (!client) {
+      setError('Please save your API key first');
+      return;
     }
-  };
+
+    await client.addToWhitelist(newDomain);
+    setSuccess('✅ Domain added to whitelist!');
+    setNewDomain('');
+    await loadWhitelist(savedApiKey);
+    setTimeout(() => setSuccess(''), 3000);
+  } catch (err) {
+    setError(`Failed to add domain: ${err}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Remove domain from whitelist
+const removeDomain = async (whitelistId: string) => {
+  if (!confirm('Remove this domain from whitelist?')) return;
+
+  try {
+    setLoading(true);
+    const client = getApiClient();
+    if (!client) return;
+
+    await client.removeFromWhitelist(whitelistId);
+    await loadWhitelist(savedApiKey);
+    setSuccess('✅ Domain removed!');
+    setTimeout(() => setSuccess(''), 3000);
+  } catch (err) {
+    setError(`Failed to remove domain: ${err}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadPatterns = async (key: string) => {
     try {
@@ -186,6 +247,13 @@ export default function OptionsApp() {
           onClick={() => setActiveTab('settings')}
         >
           ⚙️ Settings
+        </TabButton>
+        <TabButton
+          active={activeTab === 'whitelist'}
+          onClick={() => setActiveTab('whitelist')}
+          disabled={!savedApiKey}
+        >
+          ✓ Whitelisted Sites
         </TabButton>
         <TabButton
           active={activeTab === 'patterns'}
@@ -483,6 +551,112 @@ export default function OptionsApp() {
             Go to Settings
           </button>
         </div>
+      )}
+
+      {activeTab === 'whitelist' && savedApiKey && (
+        <>
+          <div
+            style={{
+              marginBottom: '40px',
+              padding: '20px',
+              border: '1px solid #ddd',
+              borderRadius: '8px',
+            }}
+          >
+            <h2>Add Site to Whitelist</h2>
+            <p style={{ color: '#666', fontSize: '14px', marginBottom: '16px' }}>
+              Paste Proof will not scan for PII on whitelisted sites. Use this for trusted internal tools.
+            </p>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                placeholder="example.com"
+                value={newDomain}
+                onChange={e => setNewDomain(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  fontSize: '14px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                }}
+              />
+              <button
+                onClick={addDomain}
+                disabled={loading || !newDomain}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: loading || !newDomain ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h2>Whitelisted Sites ({whitelist.length})</h2>
+
+            {whitelist.length === 0 ? (
+              <p style={{ color: '#666' }}>
+                No whitelisted sites yet. Add trusted domains above.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}
+              >
+                {whitelist.map(site => (
+                  <div
+                    key={site.id}
+                    style={{
+                      padding: '15px',
+                      border: '1px solid #ddd',
+                      borderRadius: '8px',
+                      backgroundColor: '#f9f9f9',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '600', fontSize: '15px' }}>
+                        {site.domain}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                        Added {new Date(site.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeDomain(site.id)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#f44336',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {/* Error/Success Messages */}
