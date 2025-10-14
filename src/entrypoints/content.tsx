@@ -12,6 +12,32 @@ export default defineContentScript({
   matches: ['<all_urls>'],
 
   async main(ctx) {
+    // Check if extension is enabled
+    const { enabled = true } = await browser.storage.local.get('enabled');
+    if (!enabled) {
+      console.log('Paste Proof is disabled');
+      return;
+    }
+
+    // Check if current site is whitelisted
+    const currentDomain = window.location.hostname;
+    const { apiKey } = await browser.storage.local.get('apiKey');
+    
+    if (apiKey) {
+      try {
+        const client = initializeApiClient(apiKey);
+        const isWhitelisted = await client.isWhitelisted(currentDomain);
+        
+        if (isWhitelisted) {
+          console.log(`Paste Proof: ${currentDomain} is whitelisted - skipping`);
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to check whitelist:', error);
+        // Continue with detection if check fails
+      }
+    }
+
     await initializeCustomPatterns();
     let activeInput: HTMLInputElement | HTMLTextAreaElement | null = null;
     let badgeContainer: HTMLDivElement | null = null;
