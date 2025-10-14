@@ -246,7 +246,6 @@ export default defineContentScript({
     };
 
     const anonymizeValue = (detection: DetectionResult): string => {
-      console.log('detection', detection.type);
       switch (detection.type) {
         case 'CREDIT_CARD':
           // Show last 4 digits
