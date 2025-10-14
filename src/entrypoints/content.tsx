@@ -2,221 +2,17 @@ import {
   detectPii,
   DetectionResult,
   setCustomPatterns,
-  getCustomPatterns,
-  PiiType,
 } from '@/shared/pii-detector';
-import { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { getApiClient, initializeApiClient } from '@/shared/api-client';
-
-// Simple warning badge component without MUI dependencies
-function SimpleWarningBadge({
-  detections,
-  onAnonymize,
-  onPopupStateChange,
-}: {
-  detections: DetectionResult[];
-  onAnonymize: (detections: DetectionResult[]) => void;
-  onPopupStateChange: (isOpen: boolean) => void;
-}) {
-  const [showPopup, setShowPopup] = useState(false);
-  const tooltipText = `PII Detected: ${detections.map(d => d.type).join(', ')}`;
-
-  const handleTogglePopup = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newState = !showPopup;
-    setShowPopup(newState);
-    onPopupStateChange(newState);
-  };
-
-  const handleAnonymizeClick = (detection: DetectionResult) => {
-    onAnonymize([detection]);
-    setShowPopup(false);
-    onPopupStateChange(false);
-  };
-
-  const handleAnonymizeAll = () => {
-    onAnonymize(detections);
-    setShowPopup(false);
-    onPopupStateChange(false);
-  };
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <div
-        title={tooltipText}
-        onClick={handleTogglePopup}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '28px',
-          height: '28px',
-          backgroundColor: '#fff3cd',
-          border: '2px solid #ffc107',
-          borderRadius: '50%',
-          cursor: 'pointer',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-        }}
-      >
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"
-            fill="#ff9800"
-          />
-        </svg>
-      </div>
-
-      {showPopup && (
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{
-            position: 'absolute',
-            top: '100%',
-            left: '100%',
-            marginTop: '8px',
-            backgroundColor: 'white',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            padding: '12px',
-            minWidth: '280px',
-            maxWidth: '400px',
-            zIndex: 2147483647,
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            fontSize: '14px',
-          }}
-        >
-          <div
-            style={{
-              fontWeight: '600',
-              marginBottom: '12px',
-              fontSize: '16px',
-              color: '#333',
-            }}
-          >
-            ⚠️ PII Detected
-          </div>
-
-          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-            {detections.map((d, idx) => (
-              <div
-                key={idx}
-                style={{
-                  padding: '10px',
-                  marginBottom: '8px',
-                  backgroundColor: '#f8f9fa',
-                  borderRadius: '6px',
-                  border: '1px solid #e9ecef',
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: '600',
-                    color: '#ff9800',
-                    marginBottom: '6px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {d.type.replace(/_/g, ' ')}
-                </div>
-                <div
-                  style={{
-                    marginBottom: '8px',
-                    color: '#666',
-                    wordBreak: 'break-all',
-                    fontFamily: 'monospace',
-                    fontSize: '13px',
-                    padding: '6px',
-                    backgroundColor: 'white',
-                    borderRadius: '4px',
-                  }}
-                >
-                  {d.value}
-                </div>
-                <button
-                  onClick={() => handleAnonymizeClick(d)}
-                  style={{
-                    backgroundColor: '#ff9800',
-                    color: 'white',
-                    border: 'none',
-                    padding: '6px 12px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    width: '100%',
-                  }}
-                  onMouseEnter={e => {
-                    (e.target as HTMLButtonElement).style.backgroundColor =
-                      '#f57c00';
-                  }}
-                  onMouseLeave={e => {
-                    (e.target as HTMLButtonElement).style.backgroundColor =
-                      '#ff9800';
-                  }}
-                >
-                  Anonymize This
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {detections.length > 1 && (
-            <button
-              onClick={handleAnonymizeAll}
-              style={{
-                backgroundColor: '#d32f2f',
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '600',
-                width: '100%',
-                marginTop: '8px',
-              }}
-              onMouseEnter={e => {
-                (e.target as HTMLButtonElement).style.backgroundColor =
-                  '#c62828';
-              }}
-              onMouseLeave={e => {
-                (e.target as HTMLButtonElement).style.backgroundColor =
-                  '#d32f2f';
-              }}
-            >
-              Anonymize All ({detections.length})
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+import { SimpleWarningBadge } from '@/shared/components';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
 
   async main(ctx) {
     await initializeCustomPatterns();
-    console.log('=== DEBUG: Custom Patterns ===');
-    console.log('Custom patterns:', getCustomPatterns());
-    console.log('Testing detection with custom patterns...');
-
-    const testText = 'EMP-123456 and my card is 4242 4242 4242 4242';
-    const testResults = detectPii(testText);
-    console.log('Detection results:', testResults);
-
     let activeInput: HTMLInputElement | HTMLTextAreaElement | null = null;
     let badgeContainer: HTMLDivElement | null = null;
     let badgeRoot: Root | null = null;
@@ -394,6 +190,8 @@ export default defineContentScript({
       }
 
       if (detections.length > 0 && activeInput) {
+        const currentText = getInputValue(activeInput);
+
         if (!badgeContainer) {
           badgeContainer = createBadgeContainer(activeInput);
           badgeContainer.offsetHeight;
@@ -407,6 +205,7 @@ export default defineContentScript({
                 isPopupOpen = isOpen;
                 console.log('Popup state changed:', isOpen);
               }}
+              inputText={currentText}
             />
           );
 
@@ -420,6 +219,7 @@ export default defineContentScript({
                 isPopupOpen = isOpen;
                 console.log('Popup state changed:', isOpen);
               }}
+              inputText={currentText}
             />
           );
         }
@@ -556,11 +356,10 @@ export default defineContentScript({
     async function initializeCustomPatterns() {
       try {
         // Get API key from storage
-        const result = await browser.storage.local.get('apiKey');
+        const result = await browser.storage.local.get("apiKey");
         const apiKey = result.apiKey as string | undefined;
 
         if (!apiKey) {
-          console.log('No API key found - using built-in patterns only');
           return;
         }
 
@@ -571,9 +370,8 @@ export default defineContentScript({
         const patterns = await apiClient.getPatterns();
         setCustomPatterns(patterns);
 
-        console.log(`✅ Loaded ${patterns.length} custom patterns from API`);
       } catch (error) {
-        console.error('Failed to load custom patterns:', error);
+        console.error("Failed to load custom patterns:", error);
         // Continue with built-in patterns only
       }
     }

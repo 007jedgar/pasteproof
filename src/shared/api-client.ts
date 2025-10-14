@@ -7,6 +7,40 @@ export type ApiConfig = {
   baseUrl?: string;
 };
 
+export type AiDetection = {
+  type: string;
+  value: string;
+  confidence: number;
+  reason: string;
+};
+
+export type AiAnalysisResult = {
+  hasPII: boolean;
+  confidence: number;
+  detections: AiDetection[];
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+};
+
+export type AuditLog = {
+  id: string;
+  user_id: string;
+  event_type: string;
+  domain: string;
+  pii_type: string;
+  was_anonymized: number;
+  metadata: string;
+  timestamp: number;
+};
+
+export type DashboardStats = {
+  total_detections: number;
+  total_anonymizations: number;
+  total_ai_scans: number;
+  most_common_pii: Array<{ type: string; count: number }>;
+  riskiest_domains: Array<{ domain: string; count: number }>;
+  detections_by_day: Array<{ date: string; count: number }>;
+};
+
 export class PasteProofApiClient {
   private apiKey: string;
   private baseUrl: string;
@@ -40,6 +74,50 @@ export class PasteProofApiClient {
 
     return response.json();
   }
+
+    // AI Context Analysis
+  async analyzeContext(text: string, context?: string): Promise<AiAnalysisResult> {
+    const data = await this.fetch<{
+      success: boolean;
+      analysis: AiAnalysisResult;
+      metadata: {
+        text_length: number;
+        model: string;
+        provider: string;
+      };
+    }>("/api/analyze-context", {
+      method: "POST",
+      body: JSON.stringify({ text, context }),
+    });
+    return data.analysis;
+  }
+
+    async getAuditLogs(params?: {
+    startDate?: number;
+    endDate?: number;
+    eventType?: string;
+    limit?: number;
+  }): Promise<AuditLog[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.startDate) queryParams.set('start', params.startDate.toString());
+    if (params?.endDate) queryParams.set('end', params.endDate.toString());
+    if (params?.eventType) queryParams.set('type', params.eventType);
+    if (params?.limit) queryParams.set('limit', params.limit.toString());
+
+    const data = await this.fetch<{ logs: AuditLog[] }>(
+      `/api/logs?${queryParams.toString()}`
+    );
+    return data.logs;
+  }
+
+  // Get statistics for dashboard
+  async getStats(days: number = 7): Promise<DashboardStats> {
+    const data = await this.fetch<{ stats: DashboardStats }>(
+      `/api/stats?days=${days}`
+    );
+    return data.stats;
+  }
+
 
   // Fetch all custom patterns
   async getPatterns(): Promise<CustomPattern[]> {
