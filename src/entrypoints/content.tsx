@@ -246,6 +246,7 @@ export default defineContentScript({
     };
 
     const anonymizeValue = (detection: DetectionResult): string => {
+      console.log('detection', detection.type);
       switch (detection.type) {
         case 'CREDIT_CARD':
           // Show last 4 digits
@@ -268,13 +269,14 @@ export default defineContentScript({
           return `${maskedUser}@${domain}`;
 
         case 'SSN':
-          // Show last 4 digits: XXX-XX-1234
-          return detection.value.replace(/\d(?=\d{4})/g, '•');
-
         case 'PHONE':
-          // Show last 4 digits
-          return detection.value.replace(/\d(?=\d{4})/g, '•');
-
+          // This function replaces any digit with a '•' if it's not one of the last 4 digits in the string.
+          return detection.value.replace(/(\d)/g, (match, _, offset) => {
+            const digitsToEnd = (
+              detection.value.substring(offset).match(/\d/g) || []
+            ).length;
+            return digitsToEnd > 4 ? '•' : match;
+          });
         default:
           return '[REDACTED]';
       }
