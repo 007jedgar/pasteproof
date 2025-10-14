@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { initializeApiClient, getApiClient } from '@/shared/api-client';
 import { CustomPattern } from '@/shared/pii-detector';
-
+import Dashboard from './Dashboard';
 
 export default function OptionsApp() {
   const [apiKey, setApiKey] = useState('');
@@ -10,6 +10,16 @@ export default function OptionsApp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  // Get initial tab from URL hash
+  const getInitialTab = () => {
+    const hash = window.location.hash.replace('#', '');
+    if (hash === 'dashboard') return 'dashboard';
+    if (hash === 'patterns') return 'patterns';
+    return 'settings';
+  };
+
+  const [activeTab, setActiveTab] = useState<"settings" | "patterns" | "dashboard">(getInitialTab());
 
   // Form for new pattern
   const [newPattern, setNewPattern] = useState({
@@ -21,6 +31,24 @@ export default function OptionsApp() {
 
   useEffect(() => {
     loadSettings();
+  }, []);
+
+  // Update URL hash when tab changes
+  useEffect(() => {
+    window.location.hash = activeTab;
+  }, [activeTab]);
+
+  // Listen for hash changes
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash === 'dashboard' || hash === 'patterns' || hash === 'settings') {
+        setActiveTab(hash as any);
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
   const loadSettings = async () => {
@@ -52,16 +80,13 @@ export default function OptionsApp() {
       setLoading(true);
       setError('');
 
-      // Validate API key by fetching user info
       const client = initializeApiClient(apiKey);
       await client.getUserInfo();
 
-      // Save to storage
       await browser.storage.local.set({ apiKey });
       setSavedApiKey(apiKey);
       setSuccess('✅ API key saved successfully!');
 
-      // Load patterns
       await loadPatterns(apiKey);
 
       setTimeout(() => setSuccess(''), 3000);
@@ -83,7 +108,6 @@ export default function OptionsApp() {
         return;
       }
 
-      // Validate regex
       try {
         new RegExp(newPattern.pattern);
       } catch {
@@ -101,7 +125,6 @@ export default function OptionsApp() {
         description: '',
       });
 
-      // Reload patterns
       await loadPatterns(savedApiKey);
 
       setTimeout(() => setSuccess(''), 3000);
@@ -135,69 +158,109 @@ export default function OptionsApp() {
     <div
       style={{
         padding: '40px',
-        maxWidth: '800px',
+        maxWidth: '1200px',
         margin: '0 auto',
         fontFamily: 'system-ui',
       }}
     >
-      <h1>🛡️ Paste Proof Settings</h1>
-
-      {/* API Key Section */}
-      <div
-        style={{
-          marginBottom: '40px',
-          padding: '20px',
-          border: '1px solid #ddd',
-          borderRadius: '8px',
-        }}
-      >
-        <h2>API Key</h2>
-        <p style={{ color: '#666' }}>
-          Enter your API key to enable Premium features (custom patterns, AI
-          detection, audit logs)
-        </p>
-
-        <input
-          type="password"
-          value={apiKey}
-          onChange={e => setApiKey(e.target.value)}
-          placeholder="pk_test_..."
-          style={{
-            width: '90%',
-            padding: '10px',
-            fontSize: '14px',
-            border: '1px solid #ddd',
-            borderRadius: '4px',
-            marginBottom: '10px',
-          }}
-        />
-
-        <button
-          onClick={saveApiKey}
-          disabled={loading || !apiKey}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#ff9800',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            fontSize: '14px',
-            fontWeight: '600',
-          }}
-        >
-          {loading ? 'Saving...' : 'Save API Key'}
-        </button>
-
-        {savedApiKey && (
-          <p style={{ marginTop: '10px', color: '#4caf50', fontSize: '14px' }}>
-            ✅ API key configured
-          </p>
-        )}
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
+        <div style={{ fontSize: '48px' }}>🛡️</div>
+        <div>
+          <h1 style={{ margin: 0 }}>Paste Proof</h1>
+          <p style={{ margin: '4px 0 0 0', color: '#666' }}>Your pasteboard bodyguard</p>
+        </div>
       </div>
 
-      {/* Custom Patterns Section */}
-      {savedApiKey && (
+      {/* Navigation Tabs */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '32px',
+          borderBottom: '2px solid #e0e0e0',
+        }}
+      >
+        <TabButton
+          active={activeTab === 'settings'}
+          onClick={() => setActiveTab('settings')}
+        >
+          ⚙️ Settings
+        </TabButton>
+        <TabButton
+          active={activeTab === 'patterns'}
+          onClick={() => setActiveTab('patterns')}
+          disabled={!savedApiKey}
+        >
+          🔍 Custom Patterns
+        </TabButton>
+        <TabButton
+          active={activeTab === 'dashboard'}
+          onClick={() => setActiveTab('dashboard')}
+          disabled={!savedApiKey}
+        >
+          📊 Dashboard
+        </TabButton>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'settings' && (
+        <div
+          style={{
+            marginBottom: '40px',
+            padding: '20px',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+          }}
+        >
+          <h2>API Key</h2>
+          <p style={{ color: '#666' }}>
+            Enter your API key to enable Premium features (custom patterns, AI
+            detection, audit logs)
+          </p>
+
+          <input
+            type="password"
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            placeholder="pk_test_..."
+            style={{
+              width: '100%',
+              padding: '10px',
+              fontSize: '14px',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              marginBottom: '10px',
+              boxSizing: 'border-box',
+            }}
+          />
+
+          <button
+            onClick={saveApiKey}
+            disabled={loading || !apiKey}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#ff9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: '600',
+            }}
+          >
+            {loading ? 'Saving...' : 'Save API Key'}
+          </button>
+
+          {savedApiKey && (
+            <p style={{ marginTop: '10px', color: '#4caf50', fontSize: '14px' }}>
+              ✅ API key configured
+            </p>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'patterns' && savedApiKey && (
         <>
           <div
             style={{
@@ -217,12 +280,13 @@ export default function OptionsApp() {
                 setNewPattern({ ...newPattern, name: e.target.value })
               }
               style={{
-                width: '90%',
+                width: '100%',
                 padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
                 borderRadius: '4px',
                 marginBottom: '10px',
+                boxSizing: 'border-box',
               }}
             />
 
@@ -234,13 +298,14 @@ export default function OptionsApp() {
                 setNewPattern({ ...newPattern, pattern: e.target.value })
               }
               style={{
-                width: '90%',
+                width: '100%',
                 padding: '10px',
                 fontSize: '14px',
                 fontFamily: 'monospace',
                 border: '1px solid #ddd',
                 borderRadius: '4px',
                 marginBottom: '10px',
+                boxSizing: 'border-box',
               }}
             />
 
@@ -255,12 +320,13 @@ export default function OptionsApp() {
                 })
               }
               style={{
-                width: '90%',
+                width: '100%',
                 padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
                 borderRadius: '4px',
                 marginBottom: '10px',
+                boxSizing: 'border-box',
               }}
             />
 
@@ -271,13 +337,14 @@ export default function OptionsApp() {
                 setNewPattern({ ...newPattern, description: e.target.value })
               }
               style={{
-                width: '90%',
+                width: '100%',
                 padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
                 borderRadius: '4px',
                 marginBottom: '10px',
                 minHeight: '60px',
+                boxSizing: 'border-box',
               }}
             />
 
@@ -392,6 +459,32 @@ export default function OptionsApp() {
         </>
       )}
 
+      {activeTab === 'dashboard' && savedApiKey && <Dashboard />}
+
+      {activeTab === 'dashboard' && !savedApiKey && (
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔐</div>
+          <p style={{ color: '#666', marginBottom: '16px' }}>
+            Please configure your API key in Settings to view the dashboard
+          </p>
+          <button
+            onClick={() => setActiveTab('settings')}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#ff9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '600',
+            }}
+          >
+            Go to Settings
+          </button>
+        </div>
+      )}
+
       {/* Error/Success Messages */}
       {error && (
         <div
@@ -421,5 +514,37 @@ export default function OptionsApp() {
         </div>
       )}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: '12px 24px',
+        border: 'none',
+        background: 'none',
+        borderBottom: active ? '3px solid #ff9800' : '3px solid transparent',
+        color: disabled ? '#ccc' : active ? '#ff9800' : '#666',
+        fontWeight: active ? '600' : '400',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontSize: '15px',
+        transition: 'all 0.2s',
+      }}
+    >
+      {children}
+    </button>
   );
 }
