@@ -35,7 +35,10 @@ export function SimpleWarningBadge({
     }
   };
 
-  const handleAiScan = async () => {
+  const handleAiScan = async (e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent form submission
+    e.stopPropagation(); // Stop event bubbling
+
     setAiScanning(true);
     setAiError(null);
     setActiveTab('ai');
@@ -70,7 +73,12 @@ export function SimpleWarningBadge({
     }
   };
 
-  const handleAnonymizeClick = (detection: DetectionResult | AiDetection) => {
+  const handleAnonymizeClick = (detection: DetectionResult | AiDetection, e?: React.MouseEvent) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
     // Convert AI detection to DetectionResult format
     const detectionToAnonymize: DetectionResult = 'confidence' in detection 
       ? { type: detection.type, value: detection.value }
@@ -121,7 +129,13 @@ export function SimpleWarningBadge({
 
       {showPopup && (
         <div
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation(); // Also prevent on mousedown
+          }}
           style={{
             position: "absolute",
             top: "100%",
@@ -237,7 +251,11 @@ export function SimpleWarningBadge({
                       {d.value}
                     </div>
                     <button
-                      onClick={() => handleAnonymizeClick(d)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAnonymizeClick(d);
+                      }}
                       style={{
                         backgroundColor: "#ff9800",
                         color: "white",
