@@ -175,7 +175,12 @@ export function SimpleWarningBadge({
             }}
           >
             <button
-              onClick={() => setActiveTab('regex')}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('regex');
+              }}
               style={{
                 flex: 1,
                 padding: "8px",
@@ -191,6 +196,7 @@ export function SimpleWarningBadge({
               Pattern Match ({detections.length})
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab('ai')}
               style={{
                 flex: 1,
@@ -251,6 +257,7 @@ export function SimpleWarningBadge({
                       {d.value}
                     </div>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -281,6 +288,7 @@ export function SimpleWarningBadge({
 
                 {detections.length > 1 && (
                   <button
+                    type="button"
                     onClick={handleAnonymizeAll}
                     style={{
                       backgroundColor: "#d32f2f",
@@ -315,6 +323,7 @@ export function SimpleWarningBadge({
                       Use AI to detect sensitive information that patterns might miss
                     </p>
                     <button
+                      type="button"
                       onClick={handleAiScan}
                       style={{
                         backgroundColor: "#9c27b0",
@@ -424,6 +433,7 @@ export function SimpleWarningBadge({
                           {d.reason}
                         </div>
                         <button
+                          type="button"
                           onClick={() => handleAnonymizeClick(d)}
                           style={{
                             backgroundColor: "#9c27b0",
