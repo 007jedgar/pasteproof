@@ -7,6 +7,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# env
+.env
+.env.production
+
 node_modules
 .output
 stats.html

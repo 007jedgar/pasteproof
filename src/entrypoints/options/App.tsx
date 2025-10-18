@@ -13,8 +13,9 @@ export default function OptionsApp() {
   const [success, setSuccess] = useState('');
   const [whitelist, setWhitelist] = useState<WhitelistSite[]>([]);
   const [newDomain, setNewDomain] = useState('');
+  const [autoAiScan, setAutoAiScan] = useState(false);
+  const [extensionEnabled, setExtensionEnabled] = useState(true);
 
-  // Get initial tab from URL hash
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '');
     if (hash === 'dashboard') return 'dashboard';
@@ -25,7 +26,6 @@ export default function OptionsApp() {
 
   const [activeTab, setActiveTab] = useState<"settings" | "whitelist" | "patterns" | "dashboard">(getInitialTab());
 
-  // Form for new pattern
   const [newPattern, setNewPattern] = useState({
     name: '',
     pattern: '',
@@ -37,16 +37,14 @@ export default function OptionsApp() {
     loadSettings();
   }, []);
 
-  // Update URL hash when tab changes
   useEffect(() => {
     window.location.hash = activeTab;
   }, [activeTab]);
 
-  // Listen for hash changes
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
-      if (hash === 'dashboard' || hash === 'patterns' || hash === 'settings') {
+      if (hash === 'dashboard' || hash === 'patterns' || hash === 'settings' || hash === 'whitelist') {
         setActiveTab(hash as any);
       }
     };
@@ -55,74 +53,74 @@ export default function OptionsApp() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-const loadWhitelist = async (key: string) => {
-  try {
-    const client = initializeApiClient(key);
-    const sites = await client.getWhitelist();
-    setWhitelist(sites);
-  } catch (err) {
-    console.error('Failed to load whitelist:', err);
-  }
-};
+  const loadWhitelist = async (key: string) => {
+    try {
+      const client = initializeApiClient(key);
+      const sites = await client.getWhitelist();
+      setWhitelist(sites);
+    } catch (err) {
+      console.error('Failed to load whitelist:', err);
+    }
+  };
 
-// Add to loadSettings
-const loadSettings = async () => {
-  const result = await browser.storage.local.get('apiKey');
-  const key = result.apiKey as string | undefined;
+  const loadSettings = async () => {
+    const result = await browser.storage.local.get(['apiKey', 'autoAiScan', 'enabled']);
+    const key = result.apiKey as string | undefined;
 
-  if (key) {
-    setApiKey(key);
-    setSavedApiKey(key);
-    await Promise.all([
-      loadPatterns(key),
-      loadWhitelist(key)
-    ]);
-  }
-};
-
-// Add domain to whitelist
-const addDomain = async () => {
-  try {
-    setLoading(true);
-    setError('');
-
-    const client = getApiClient();
-    if (!client) {
-      setError('Please save your API key first');
-      return;
+    if (key) {
+      setApiKey(key);
+      setSavedApiKey(key);
+      await Promise.all([
+        loadPatterns(key),
+        loadWhitelist(key)
+      ]);
     }
 
-    await client.addToWhitelist(newDomain);
-    setSuccess('✅ Domain added to whitelist!');
-    setNewDomain('');
-    await loadWhitelist(savedApiKey);
-    setTimeout(() => setSuccess(''), 3000);
-  } catch (err) {
-    setError(`Failed to add domain: ${err}`);
-  } finally {
-    setLoading(false);
-  }
-};
+    setAutoAiScan(result.autoAiScan !== false);
+    setExtensionEnabled(result.enabled !== false);
+  };
 
-// Remove domain from whitelist
-const removeDomain = async (whitelistId: string) => {
-  if (!confirm('Remove this domain from whitelist?')) return;
+  const addDomain = async () => {
+    try {
+      setLoading(true);
+      setError('');
 
-  try {
-    setLoading(true);
-    const client = getApiClient();
-    if (!client) return;
+      const client = getApiClient();
+      if (!client) {
+        setError('Please save your API key first');
+        return;
+      }
 
-    await client.removeFromWhitelist(whitelistId);
-    await loadWhitelist(savedApiKey);
-    setSuccess('✅ Domain removed!');
-    setTimeout(() => setSuccess(''), 3000);
-  } catch (err) {
-    setError(`Failed to remove domain: ${err}`);
-  } finally {
-    setLoading(false);
-  }
-};
+      await client.addToWhitelist(newDomain);
+      setSuccess('✅ Domain added to whitelist!');
+      setNewDomain('');
+      await loadWhitelist(savedApiKey);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(`Failed to add domain: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeDomain = async (whitelistId: string) => {
+    if (!confirm('Remove this domain from whitelist?')) return;
+
+    try {
+      setLoading(true);
+      const client = getApiClient();
+      if (!client) return;
+
+      await client.removeFromWhitelist(whitelistId);
+      await loadWhitelist(savedApiKey);
+      setSuccess('✅ Domain removed!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(`Failed to remove domain: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadPatterns = async (key: string) => {
     try {
@@ -157,6 +155,28 @@ const removeDomain = async (whitelistId: string) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleAutoAiScan = async (checked: boolean) => {
+    setAutoAiScan(checked);
+    await browser.storage.local.set({ autoAiScan: checked });
+    setSuccess('✅ Auto AI Scan ' + (checked ? 'enabled' : 'disabled'));
+    setTimeout(() => setSuccess(''), 2000);
+  };
+
+  const toggleExtensionEnabled = async (checked: boolean) => {
+    setExtensionEnabled(checked);
+    await browser.storage.local.set({ enabled: checked });
+    
+    const tabs = await browser.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.id) {
+        browser.tabs.reload(tab.id);
+      }
+    }
+    
+    setSuccess('✅ Extension ' + (checked ? 'enabled' : 'disabled'));
+    setTimeout(() => setSuccess(''), 2000);
   };
 
   const createPattern = async () => {
@@ -225,7 +245,6 @@ const removeDomain = async (whitelistId: string) => {
         fontFamily: 'system-ui',
       }}
     >
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
         <img src={Logo} alt='PasteProof Logo'></img>
         <div>
@@ -234,7 +253,6 @@ const removeDomain = async (whitelistId: string) => {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
       <div
         style={{
           display: 'flex',
@@ -272,61 +290,174 @@ const removeDomain = async (whitelistId: string) => {
         </TabButton>
       </div>
 
-      {/* Tab Content */}
       {activeTab === 'settings' && (
-        <div
-          style={{
-            marginBottom: '40px',
-            padding: '20px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-          }}
-        >
-          <h2>API Key</h2>
-          <p style={{ color: '#666' }}>
-            Enter your API key to enable Premium features (custom patterns, AI
-            detection, audit logs)
-          </p>
-
-          <input
-            type="password"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder="pk_test_..."
+        <>
+          {/* Extension Enable/Disable */}
+          <div
             style={{
-              width: '100%',
-              padding: '10px',
-              fontSize: '14px',
+              marginBottom: '24px',
+              padding: '20px',
               border: '1px solid #ddd',
-              borderRadius: '4px',
-              marginBottom: '10px',
-              boxSizing: 'border-box',
-            }}
-          />
-
-          <button
-            onClick={saveApiKey}
-            disabled={loading || !apiKey}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#ff9800',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: '600',
+              borderRadius: '8px',
+              backgroundColor: '#f8f9fa',
             }}
           >
-            {loading ? 'Saving...' : 'Save API Key'}
-          </button>
+            <h2 style={{ marginTop: 0 }}>Extension Status</h2>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px',
+                backgroundColor: 'white',
+                borderRadius: '6px',
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: '600', marginBottom: '4px' }}>
+                  Enable Extension
+                </div>
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  Turn PII detection on or off globally
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={extensionEnabled}
+                onChange={toggleExtensionEnabled}
+                color="#4caf50"
+              />
+            </div>
+          </div>
 
-          {savedApiKey && (
-            <p style={{ marginTop: '10px', color: '#4caf50', fontSize: '14px' }}>
-              ✅ API key configured
+          {/* API Key Section */}
+          <div
+            style={{
+              marginBottom: '24px',
+              padding: '20px',
+              border: '1px solid #ddd',
+              borderRadius: '8px',
+            }}
+          >
+            <h2 style={{ marginTop: 0 }}>API Key</h2>
+            <p style={{ color: '#666' }}>
+              Enter your API key to enable Premium features (custom patterns, AI
+              detection, audit logs)
             </p>
+
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="pk_test_..."
+              style={{
+                width: '100%',
+                padding: '10px',
+                fontSize: '14px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                marginBottom: '10px',
+                boxSizing: 'border-box',
+              }}
+            />
+
+            <button
+              onClick={saveApiKey}
+              disabled={loading || !apiKey}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#ff9800',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                fontWeight: '600',
+              }}
+            >
+              {loading ? 'Saving...' : 'Save API Key'}
+            </button>
+
+            {savedApiKey && (
+              <p style={{ marginTop: '10px', color: '#4caf50', fontSize: '14px' }}>
+                ✅ API key configured
+              </p>
+            )}
+          </div>
+
+          {/* Auto AI Scan Setting */}
+          {savedApiKey && (
+            <div
+              style={{
+                marginBottom: '24px',
+                padding: '20px',
+                border: '1px solid #ddd',
+                borderRadius: '8px',
+                backgroundColor: '#f3e5f5',
+              }}
+            >
+              <h2 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🤖 AI Detection Settings
+                <span
+                  style={{
+                    fontSize: '11px',
+                    backgroundColor: '#9c27b0',
+                    color: 'white',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    fontWeight: '600',
+                  }}
+                >
+                  PREMIUM
+                </span>
+              </h2>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '16px',
+                  backgroundColor: 'white',
+                  borderRadius: '6px',
+                  marginBottom: '16px',
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: '600', marginBottom: '6px', fontSize: '15px' }}>
+                    Auto AI Scan
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
+                    Automatically scan inputs with AI for additional PII detection.
+                    Results are cached for 30 seconds to minimize API calls.
+                  </div>
+                </div>
+                <ToggleSwitch
+                  checked={autoAiScan}
+                  onChange={toggleAutoAiScan}
+                  color="#9c27b0"
+                />
+              </div>
+
+              <div
+                style={{
+                  padding: '12px',
+                  backgroundColor: '#fff3cd',
+                  borderLeft: '4px solid #ffc107',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#856404',
+                }}
+              >
+                <strong>ℹ️ Daily AI Scan Limits:</strong>
+                <div style={{ marginTop: '6px', lineHeight: '1.6' }}>
+                  • Free: 10 scans/day<br />
+                  • Premium: 100 scans/day<br />
+                  • Enterprise: 1000 scans/day
+                </div>
+              </div>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {activeTab === 'patterns' && savedApiKey && (
@@ -660,7 +791,6 @@ const removeDomain = async (whitelistId: string) => {
         </>
       )}
 
-      {/* Error/Success Messages */}
       {error && (
         <div
           style={{
@@ -721,5 +851,53 @@ function TabButton({
     >
       {children}
     </button>
+  );
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  color = '#4caf50',
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  color?: string;
+}) {
+  return (
+    <label style={{ position: 'relative', display: 'inline-block', width: '48px', height: '24px' }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ opacity: 0, width: 0, height: 0 }}
+      />
+      <span
+        style={{
+          position: 'absolute',
+          cursor: 'pointer',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: checked ? color : '#ccc',
+          transition: '0.4s',
+          borderRadius: '24px',
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            content: '',
+            height: '18px',
+            width: '18px',
+            left: checked ? '26px' : '3px',
+            bottom: '3px',
+            backgroundColor: 'white',
+            transition: '0.4s',
+            borderRadius: '50%',
+          }}
+        />
+      </span>
+    </label>
   );
 }
