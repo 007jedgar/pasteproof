@@ -7,25 +7,35 @@ import ReactDOM from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { getApiClient, initializeApiClient } from '@/shared/api-client';
 import { SimpleWarningBadge } from '@/shared/components';
+import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
 
 let authToken: string | null = null;
+
+// Simple in-memory cache for AI scan results
+const aiScanCache = new Map<string, {
+  detections: any[];
+  timestamp: number;
+}>();
+
+const CACHE_DURATION = 30000; // 30 seconds
+const MIN_TEXT_LENGTH = 10;
+const MAX_TEXT_LENGTH = 5000;
 
 export default defineContentScript({
   matches: ['<all_urls>'],
 
   async main(ctx) {
-    // Check if extension is enabled
-    const storage = await browser.storage.local.get(['authToken', 'enabled']);
+    const storage = await browser.storage.local.get(['authToken', 'enabled', 'autoAiScan']);
     authToken = storage.authToken || null;
     
     const enabled = storage.enabled !== false;
+    const autoAiScan = storage.autoAiScan !== false; // Default to true
 
     if (!enabled) {
       console.log('Paste Proof is disabled');
       return;
     }
     
-    // Check if current site is whitelisted
     if (authToken) {
       const currentDomain = window.location.hostname;
       try {
@@ -52,7 +62,25 @@ export default defineContentScript({
     let activeInput: HTMLInputElement | HTMLTextAreaElement | null = null;
     let badgeContainer: HTMLDivElement | null = null;
     let badgeRoot: Root | null = null;
-    let isPopupOpen = false; // Track popup state
+    let isPopupOpen = false;
+    let lastScannedText = ''; // Track last scanned text for optimization
+
+
+        // Helper function to check if text should be scanned
+    const shouldScanText = (text: string): boolean => {
+      if (!text || text.trim().length < MIN_TEXT_LENGTH) return false;
+      if (text.length > MAX_TEXT_LENGTH) return false;
+      
+      // Don't scan if mostly whitespace
+      const trimmed = text.trim();
+      if (trimmed.length < MIN_TEXT_LENGTH) return false;
+      
+      // Don't scan very repetitive text
+      const uniqueChars = new Set(text).size;
+      if (uniqueChars < 5 && text.length > 20) return false;
+      
+      return true;
+    };
 
     const isValidInput = (
       element: Element
@@ -81,11 +109,9 @@ export default defineContentScript({
     const anonymizeValue = (detection: DetectionResult): string => {
       switch (detection.type) {
         case 'CREDIT_CARD':
-          // Show last 4 digits
           const cleaned = detection.value.replace(/\s/g, '');
           const last4 = cleaned.slice(-4);
           const masked = '•'.repeat(cleaned.length - 4);
-          // Preserve original spacing format
           if (detection.value.includes(' ')) {
             return (
               masked.match(/.{1,4}/g)?.join(' ') + ' ' + last4 ||
@@ -102,7 +128,6 @@ export default defineContentScript({
 
         case 'SSN':
         case 'PHONE':
-          // This function replaces any digit with a '•' if it's not one of the last 4 digits in the string.
           return detection.value.replace(/(\d)/g, (match, _, offset) => {
             const digitsToEnd = (
               detection.value.substring(offset).match(/\d/g) || []
@@ -130,7 +155,6 @@ export default defineContentScript({
       activeInput.value = newValue;
       activeInput.dispatchEvent(new Event('input', { bubbles: true }));
 
-      // Log anonymization events
       const apiClient = getApiClient();
       if (apiClient) {
         const domain = window.location.hostname;
@@ -147,6 +171,79 @@ export default defineContentScript({
       const results = detectPii(newValue);
       handleDetection(results);
     };
+
+       // Helper function to create cache key
+    const getCacheKey = (text: string): string => {
+      let hash = 0;
+      for (let i = 0; i < text.length; i++) {
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      return hash.toString(36);
+    };
+  
+
+// NEW: Perform AI scan on input with optimization
+const performAiScan = async (
+  input: HTMLElement,
+  text: string
+): Promise<any[] | null> => {
+  // Check if text should be scanned
+  if (!shouldScanText(text)) {
+    return null;
+  }
+
+  // Check cache first
+  const cacheKey = getCacheKey(text);
+  const cached = aiScanCache.get(cacheKey);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    console.log('Using cached AI scan result');
+    return cached.detections;
+  }
+
+  try {
+    const apiClient = getApiClient();
+    if (!apiClient) {
+      console.log('No API client - skipping AI scan');
+      return null;
+    }
+
+    console.log('Performing AI scan on input...');
+    const result = await apiClient.analyzeContext(
+      text,
+      window.location.hostname
+    );
+
+    const detections = result.detections || [];
+    
+    // Cache the results
+    aiScanCache.set(cacheKey, {
+      detections,
+      timestamp: Date.now(),
+    });
+
+    // Clean old cache entries
+    for (const [key, entry] of aiScanCache.entries()) {
+      if (Date.now() - entry.timestamp > CACHE_DURATION) {
+        aiScanCache.delete(key);
+      }
+    }
+
+    return detections;
+  } catch (error: any) {
+    console.error('AI scan error:', error);
+    // Don't show errors for rate limits or subscription issues
+    if (
+      error.message?.includes('Premium subscription required') ||
+      error.message?.includes('Rate limit exceeded')
+    ) {
+      console.log('AI scan not available:', error.message);
+    }
+    return null;
+  }
+};
 
     const createBadgeContainer = (
       input: HTMLInputElement | HTMLTextAreaElement
@@ -210,7 +307,10 @@ export default defineContentScript({
       return container;
     };
 
-    const handleDetection = async (detections: DetectionResult[]) => {
+    const handleDetection = async (
+      detections: DetectionResult[],
+      aiDetections: any[] | null = null
+    ) => {
       if (detections.length > 0 && !badgeContainer) {
         const apiClient = getApiClient();
         if (apiClient) {
@@ -240,13 +340,11 @@ export default defineContentScript({
               onAnonymize={handleAnonymize}
               onPopupStateChange={isOpen => {
                 isPopupOpen = isOpen;
-                console.log('Popup state changed:', isOpen);
               }}
               inputText={currentText}
+              initialAiDetections={aiDetections || undefined}
             />
           );
-
-          console.log('Badge rendered with detections:', detections);
         } else if (badgeRoot) {
           badgeRoot.render(
             <SimpleWarningBadge
@@ -254,9 +352,9 @@ export default defineContentScript({
               onAnonymize={handleAnonymize}
               onPopupStateChange={isOpen => {
                 isPopupOpen = isOpen;
-                console.log('Popup state changed:', isOpen);
               }}
               inputText={currentText}
+              initialAiDetections={aiDetections || undefined}
             />
           );
         }
@@ -289,17 +387,32 @@ export default defineContentScript({
       return '';
     };
 
-    const debouncedScan = debounce((text: string) => {
+    // MODIFIED: Debounced scan now includes AI scan with optimization
+    const debouncedScan = debounce(async (text: string, input: HTMLElement) => {
       const results = detectPii(text);
-      handleDetection(results);
-    }, 500);
+      
+      // Perform AI scan if enabled, text is long enough, and has changed significantly
+      let aiDetections: any[] | null = null;
+      if (autoAiScan && aiScanOptimizer.shouldScan(text)) {
+        // Only scan if text has changed significantly from last scan
+        if (aiScanOptimizer.hasSignificantChange(lastScannedText, text)) {
+          aiDetections = await performAiScan(input, text);
+          lastScannedText = text;
+        } else {
+          // Use cached result
+          aiDetections = aiScanOptimizer.getCachedResult(text);
+        }
+      }
+      
+      handleDetection(results, aiDetections);
+    }, 800); // Slightly longer debounce for AI scan
 
     const attachInputListener = (
       input: HTMLInputElement | HTMLTextAreaElement | HTMLElement
     ) => {
       const handler = () => {
         if (activeInput === input) {
-          debouncedScan(getInputValue(input));
+          debouncedScan(getInputValue(input), input);
         }
       };
 
@@ -312,7 +425,7 @@ export default defineContentScript({
 
     document.addEventListener(
       'focusin',
-      event => {
+      async event => {
         const target = event.target as HTMLElement;
 
         if (!isValidInput(target)) return;
@@ -322,7 +435,15 @@ export default defineContentScript({
         activeInput = target as HTMLInputElement | HTMLTextAreaElement;
         const currentValue = getInputValue(activeInput);
         const results = detectPii(currentValue);
-        handleDetection(results);
+        
+        // Perform immediate AI scan if enabled
+        let aiDetections: any[] | null = null;
+        if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
+          aiDetections = await performAiScan(activeInput, currentValue);
+          lastScannedText = currentValue;
+        }
+        
+        handleDetection(results, aiDetections);
 
         attachInputListener(activeInput);
       },
@@ -334,23 +455,17 @@ export default defineContentScript({
       event => {
         const relatedTarget = event.relatedTarget as Node;
 
-        // Don't remove if focus moved to the badge or popup is open
         if (badgeContainer?.contains(relatedTarget) || isPopupOpen) {
-          console.log('Keeping badge - popup is open or focus in badge');
           return;
         }
 
-        // Delay to handle rapid focus changes
         setTimeout(() => {
           const currentFocus = document.activeElement;
 
-          // Don't remove if popup is still open
           if (isPopupOpen) {
-            console.log('Keeping badge - popup still open after delay');
             return;
           }
 
-          // Don't remove if focus returned to our input
           if (currentFocus !== activeInput) {
             removeBadge();
             activeInput = null;
@@ -360,14 +475,12 @@ export default defineContentScript({
       true
     );
 
-    // Close popup if user clicks outside
     document.addEventListener('mousedown', event => {
       if (
         isPopupOpen &&
         badgeContainer &&
         !badgeContainer.contains(event.target as Node)
       ) {
-        // User clicked outside the popup, close it
         isPopupOpen = false;
         if (badgeRoot) {
           const currentValue = getInputValue(activeInput!);
@@ -387,12 +500,11 @@ export default defineContentScript({
 
     ctx.onInvalidated(() => {
       removeBadge();
+      aiScanOptimizer.clearCache();
     });
 
-    // Fetch custom patterns from API
     async function initializeCustomPatterns() {
       try {
-        // Get API key from storage
         const result = await browser.storage.local.get("apiKey");
         const apiKey = result.apiKey as string | undefined;
 
@@ -400,23 +512,25 @@ export default defineContentScript({
           return;
         }
 
-        // Initialize API client
         const apiClient = initializeApiClient(apiKey);
-
-        // Fetch custom patterns
         const patterns = await apiClient.getPatterns();
         setCustomPatterns(patterns);
 
       } catch (error) {
         console.error("Failed to load custom patterns:", error);
-        // Continue with built-in patterns only
       }
     }
 
     browser.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes.apiKey) {
-        console.log('API key changed - reloading patterns');
-        initializeCustomPatterns();
+      if (area === 'local') {
+        if (changes.apiKey) {
+          console.log('API key changed - reloading patterns');
+          initializeApiClient(changes.apiKey.newValue);
+          initializeCustomPatterns();
+        }
+        if (changes.autoAiScan) {
+          console.log('Auto AI scan setting changed:', changes.autoAiScan.newValue);
+        }
       }
     });
 

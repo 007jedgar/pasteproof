@@ -3,14 +3,6 @@ import { defineConfig } from 'wxt';
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   srcDir: 'src',
-    vite: () => ({
-    server: {
-      port: 3001,
-      hmr: {
-        port: 3001,
-      },
-    },
-  }),
   manifest: {
     name: 'Paste Proof',
     description:
@@ -23,6 +15,8 @@ export default defineConfig({
     host_permissions: [
       'http://localhost:8787/*',
       'http://localhost:3000/*',
+      'https://pasteproof-web.vercel.app',
+      'https://pasteproof-backend.jedgar.workers.dev',
       '<all_urls>', // Allows content scripts to run on all websites
     ],
     action: {

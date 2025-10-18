@@ -1,4 +1,5 @@
-import { useState } from "react";
+// src/shared/components/SimpleWarningBadge.tsx
+import { useState, useEffect } from "react";
 import { DetectionResult } from "@/shared/pii-detector";
 import { getApiClient, AiDetection } from "@/shared/api-client";
 
@@ -7,17 +8,33 @@ export function SimpleWarningBadge({
   onAnonymize,
   onPopupStateChange,
   inputText,
+  initialAiDetections,
 }: {
   detections: DetectionResult[];
   onAnonymize: (detections: DetectionResult[]) => void;
   onPopupStateChange: (isOpen: boolean) => void;
-  inputText: string;
+  inputText?: string;
+  initialAiDetections?: AiDetection[];
 }) {
   const [showPopup, setShowPopup] = useState(false);
-  const [aiDetections, setAiDetections] = useState<AiDetection[] | null>(null);
+  const [aiDetections, setAiDetections] = useState<AiDetection[] | null>(
+    initialAiDetections || null
+  );
   const [aiScanning, setAiScanning] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'regex' | 'ai'>('regex');
+  const [activeTab, setActiveTab] = useState<'regex' | 'ai'>(
+    initialAiDetections && initialAiDetections.length > 0 ? 'ai' : 'regex'
+  );
+
+  // Update AI detections when prop changes
+  useEffect(() => {
+    if (initialAiDetections) {
+      setAiDetections(initialAiDetections);
+      if (initialAiDetections.length > 0) {
+        setActiveTab('ai');
+      }
+    }
+  }, [initialAiDetections]);
 
   const tooltipText = `PII Detected: ${detections.map((d) => d.type).join(", ")}`;
 
@@ -27,17 +44,14 @@ export function SimpleWarningBadge({
     setShowPopup(newState);
     onPopupStateChange(newState);
     
-    // Reset AI state when closing
     if (!newState) {
-      setAiDetections(null);
       setAiError(null);
-      setActiveTab('regex');
     }
   };
 
   const handleAiScan = async (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent form submission
-    e.stopPropagation(); // Stop event bubbling
+    e.preventDefault();
+    e.stopPropagation();
 
     setAiScanning(true);
     setAiError(null);
@@ -50,7 +64,7 @@ export function SimpleWarningBadge({
       }
 
       const result = await apiClient.analyzeContext(
-        inputText,
+        inputText || '',
         window.location.hostname
       );
 
@@ -74,12 +88,11 @@ export function SimpleWarningBadge({
   };
 
   const handleAnonymizeClick = (detection: DetectionResult | AiDetection, e?: React.MouseEvent) => {
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
 
-    // Convert AI detection to DetectionResult format
     const detectionToAnonymize: DetectionResult = 'confidence' in detection 
       ? { type: detection.type, value: detection.value }
       : detection;
@@ -95,6 +108,8 @@ export function SimpleWarningBadge({
     onPopupStateChange(false);
   };
 
+  const totalDetections = detections.length + (aiDetections?.length || 0);
+
   return (
     <div style={{ position: "relative" }}>
       <div
@@ -106,11 +121,12 @@ export function SimpleWarningBadge({
           justifyContent: "center",
           width: "28px",
           height: "28px",
-          backgroundColor: "#fff3cd",
-          border: "2px solid #ffc107",
+          backgroundColor: aiDetections && aiDetections.length > 0 ? "#f3e5f5" : "#fff3cd",
+          border: aiDetections && aiDetections.length > 0 ? "2px solid #9c27b0" : "2px solid #ffc107",
           borderRadius: "50%",
           cursor: "pointer",
           boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+          position: "relative",
         }}
       >
         <svg
@@ -122,9 +138,28 @@ export function SimpleWarningBadge({
         >
           <path
             d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"
-            fill="#ff9800"
+            fill={aiDetections && aiDetections.length > 0 ? "#9c27b0" : "#ff9800"}
           />
         </svg>
+        {totalDetections > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              top: "-4px",
+              right: "-4px",
+              backgroundColor: "#d32f2f",
+              color: "white",
+              borderRadius: "10px",
+              padding: "2px 5px",
+              fontSize: "10px",
+              fontWeight: "bold",
+              minWidth: "18px",
+              textAlign: "center",
+            }}
+          >
+            {totalDetections}
+          </div>
+        )}
       </div>
 
       {showPopup && (
@@ -134,7 +169,7 @@ export function SimpleWarningBadge({
             e.preventDefault();
           }}
           onMouseDown={(e) => {
-            e.stopPropagation(); // Also prevent on mousedown
+            e.stopPropagation();
           }}
           style={{
             position: "absolute",
@@ -153,7 +188,6 @@ export function SimpleWarningBadge({
             fontSize: "14px",
           }}
         >
-          {/* Header */}
           <div
             style={{
               fontWeight: "600",
@@ -162,10 +196,9 @@ export function SimpleWarningBadge({
               color: "#333",
             }}
           >
-            ⚠️ PII Detected
+            ⚠️ PII Detected {totalDetections > 0 && `(${totalDetections} items)`}
           </div>
 
-          {/* Tabs */}
           <div
             style={{
               display: "flex",
@@ -197,7 +230,11 @@ export function SimpleWarningBadge({
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('ai')}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab('ai');
+              }}
               style={{
                 flex: 1,
                 padding: "8px",
@@ -214,11 +251,9 @@ export function SimpleWarningBadge({
             </button>
           </div>
 
-          {/* Content */}
           <div style={{ maxHeight: "400px", overflowY: "auto" }}>
             {activeTab === 'regex' ? (
               <>
-                {/* Regex Detections */}
                 {detections.map((d, idx) => (
                   <div
                     key={idx}
@@ -315,7 +350,6 @@ export function SimpleWarningBadge({
               </>
             ) : (
               <>
-                {/* AI Scan Tab */}
                 {!aiDetections && !aiScanning && !aiError && (
                   <div style={{ textAlign: "center", padding: "20px" }}>
                     <div style={{ fontSize: "48px", marginBottom: "12px" }}>🤖</div>
@@ -373,6 +407,19 @@ export function SimpleWarningBadge({
 
                 {aiDetections && aiDetections.length > 0 && (
                   <>
+                    <div
+                      style={{
+                        padding: "8px 12px",
+                        backgroundColor: "#f3e5f5",
+                        borderRadius: "4px",
+                        marginBottom: "12px",
+                        fontSize: "12px",
+                        color: "#7b1fa2",
+                        fontWeight: "500",
+                      }}
+                    >
+                      ✨ AI detected {aiDetections.length} potential issue{aiDetections.length !== 1 ? 's' : ''}
+                    </div>
                     {aiDetections.map((d, idx) => (
                       <div
                         key={idx}
@@ -434,7 +481,11 @@ export function SimpleWarningBadge({
                         </div>
                         <button
                           type="button"
-                          onClick={() => handleAnonymizeClick(d)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleAnonymizeClick(d);
+                          }}
                           style={{
                             backgroundColor: "#9c27b0",
                             color: "white",
@@ -458,6 +509,15 @@ export function SimpleWarningBadge({
                       </div>
                     ))}
                   </>
+                )}
+
+                {aiDetections && aiDetections.length === 0 && !aiScanning && !aiError && (
+                  <div style={{ textAlign: "center", padding: "20px" }}>
+                    <div style={{ fontSize: "48px", marginBottom: "12px" }}>✅</div>
+                    <p style={{ color: "#666" }}>
+                      AI scan complete - no additional PII detected
+                    </p>
+                  </div>
                 )}
               </>
             )}
