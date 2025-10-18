@@ -77,6 +77,7 @@ export default defineContentScript({
       return false;
     };
 
+
     const anonymizeValue = (detection: DetectionResult): string => {
       switch (detection.type) {
         case 'CREDIT_CARD':

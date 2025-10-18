@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getApiClient, initializeApiClient } from '@/shared/api-client';
+import Logo from '../../assets/icons/pasteproof-48.png'
 
 type User = {
   id: string;
@@ -183,7 +184,7 @@ const signIn = async () => {
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <div style={styles.headerIcon}>🛡️</div>
+        <img src={Logo} alt='PasteProof Logo'></img>
         <div>
           <div style={styles.title}>PasteProof</div>
           <div style={styles.subtitle}>Your copy/paste bodyguard</div>

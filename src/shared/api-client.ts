@@ -1,6 +1,6 @@
 import { CustomPattern } from './pii-detector';
 
-const API_BASE_URL = 'http://localhost:8787'; // Change to production URL later
+const API_BASE_URL = 'https://pasteproof-backend.jedgar.workers.dev'; // Change to production URL later
 
 export type ApiConfig = {
   apiKey: string;
@@ -83,20 +83,22 @@ export class PasteProofApiClient {
     return response.json();
   }
 
-    // Whitelist methods
+  // Whitelist methods
   async getWhitelist(): Promise<WhitelistSite[]> {
-    const data = await this.fetch<{ whitelist: WhitelistSite[] }>('/api/whitelist');
+    const data = await this.fetch<{ whitelist: WhitelistSite[] }>(
+      '/api/whitelist'
+    );
     return data.whitelist;
   }
 
   async addToWhitelist(domain: string): Promise<WhitelistSite> {
-    const data = await this.fetch<{ success: boolean; whitelist: WhitelistSite }>(
-      '/api/whitelist',
-      {
-        method: 'POST',
-        body: JSON.stringify({ domain }),
-      }
-    );
+    const data = await this.fetch<{
+      success: boolean;
+      whitelist: WhitelistSite;
+    }>('/api/whitelist', {
+      method: 'POST',
+      body: JSON.stringify({ domain }),
+    });
     return data.whitelist;
   }
 
@@ -113,8 +115,11 @@ export class PasteProofApiClient {
     return data.whitelisted;
   }
 
-    // AI Context Analysis
-  async analyzeContext(text: string, context?: string): Promise<AiAnalysisResult> {
+  // AI Context Analysis
+  async analyzeContext(
+    text: string,
+    context?: string
+  ): Promise<AiAnalysisResult> {
     const data = await this.fetch<{
       success: boolean;
       analysis: AiAnalysisResult;
@@ -123,21 +128,22 @@ export class PasteProofApiClient {
         model: string;
         provider: string;
       };
-    }>("/api/analyze-context", {
-      method: "POST",
+    }>('/api/analyze-context', {
+      method: 'POST',
       body: JSON.stringify({ text, context }),
     });
     return data.analysis;
   }
 
-    async getAuditLogs(params?: {
+  async getAuditLogs(params?: {
     startDate?: number;
     endDate?: number;
     eventType?: string;
     limit?: number;
   }): Promise<AuditLog[]> {
     const queryParams = new URLSearchParams();
-    if (params?.startDate) queryParams.set('start', params.startDate.toString());
+    if (params?.startDate)
+      queryParams.set('start', params.startDate.toString());
     if (params?.endDate) queryParams.set('end', params.endDate.toString());
     if (params?.eventType) queryParams.set('type', params.eventType);
     if (params?.limit) queryParams.set('limit', params.limit.toString());
@@ -155,7 +161,6 @@ export class PasteProofApiClient {
     );
     return data.stats;
   }
-
 
   // Fetch all custom patterns
   async getPatterns(): Promise<CustomPattern[]> {
