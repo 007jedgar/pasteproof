@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { getApiClient, initializeApiClient } from '@/shared/api-client';
 import Logo from '../../assets/icons/pasteproof-48.png'
-
+import pasteproofIcon from '@/assets/icons/pasteproof-48.png';
 type User = {
   id: string;
   email: string;
   name?: string;
 };
+
 
 type PopupState = {
   isAuthenticated: boolean;
@@ -41,8 +42,7 @@ export default function PopupApp() {
       const { enabled = true } = await browser.storage.local.get('enabled');
 
       // Check if user has API key
-            const { authToken, user } = await browser.storage.local.get(['authToken', 'user']);
-
+      const { authToken, user } = await browser.storage.local.get(['authToken', 'user']);
       const isAuthenticated = !!(authToken && user);
 
       // Check if current site is whitelisted
@@ -184,7 +184,7 @@ const signIn = async () => {
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <img src={Logo} alt='PasteProof Logo'></img>
+        <img src={pasteproofIcon} alt="PasteProof Logo" height={36} width={36} />
         <div>
           <div style={styles.title}>PasteProof</div>
           <div style={styles.subtitle}>Your copy/paste bodyguard</div>
@@ -276,6 +276,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '16px',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     backgroundColor: '#fafafa',
+    justifyContent: 'center',
   },
   loading: {
     textAlign: 'center',

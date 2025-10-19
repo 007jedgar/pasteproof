@@ -4,7 +4,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   srcDir: 'src',
   manifest: {
-    name: 'Paste Proof',
+    name: 'PasteProof',
     description:
       'Your pasteboard bodyguard. Prevents you from pasting sensitive data into the wrong fields.',
     version: '0.1.0',
