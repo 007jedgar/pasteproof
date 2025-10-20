@@ -27,13 +27,81 @@ export default defineContentScript({
   async main(ctx) {
     const storage = await browser.storage.local.get(['authToken', 'enabled', 'autoAiScan']);
     authToken = storage.authToken || null;
-    
-    const enabled = storage.enabled !== false;
+
+
+      const enabled = storage.enabled !== false;
     const autoAiScan = storage.autoAiScan !== false; // Default to true
 
     if (!enabled) {
       console.log('Paste Proof is disabled');
       return;
+    }
+
+        // ============================================
+    // AUTH LISTENERS (ONLY HERE, NOT OUTSIDE!)
+    // ============================================
+    
+    window.addEventListener('message', async (event) => {
+      const trustedDomains = ['pasteproof.com', 'localhost', 'vercel.app'];
+      const isTrusted = trustedDomains.some(domain => event.origin.includes(domain));
+      
+      if (!isTrusted) return;
+
+      if (event.data.type === 'PASTEPROOF_AUTH_SUCCESS') {
+        console.log('✅ Received auth from web page!', event.data);
+        
+        await browser.storage.local.set({
+          authToken: event.data.authToken,
+          user: event.data.user,
+        });
+        
+        console.log('✅ Auth saved to extension storage');
+        authToken = event.data.authToken;
+        
+        initializeApiClient(event.data.authToken);
+      }
+    });
+
+    window.addEventListener('pasteproof-auth', async (event: any) => {
+      const { authToken: token, user } = event.detail;
+      
+      await browser.storage.local.set({
+        authToken: token,
+        user,
+      });
+      
+      console.log('✅ Auth saved via custom event');
+      authToken = token;
+      initializeApiClient(token);
+    });
+
+    // Check localStorage on auth page
+    const currentHostname = window.location.hostname;
+    if (currentHostname.includes('pasteproof') || 
+        currentHostname.includes('localhost') || 
+        currentHostname.includes('vercel.app')) {
+      try {
+        const token = localStorage.getItem('pasteproof_auth_token');
+        const userStr = localStorage.getItem('pasteproof_user');
+        
+        if (token && userStr) {
+          const user = JSON.parse(userStr);
+          
+          await browser.storage.local.set({
+            authToken: token,
+            user,
+          });
+          
+          localStorage.removeItem('pasteproof_auth_token');
+          localStorage.removeItem('pasteproof_user');
+          
+          console.log('✅ Auth loaded from localStorage');
+          authToken = token;
+          initializeApiClient(token);
+        }
+      } catch (err) {
+        console.log('Could not check localStorage:', err);
+      }
     }
     
     if (authToken) {
@@ -505,14 +573,14 @@ const performAiScan = async (
 
     async function initializeCustomPatterns() {
       try {
-        const result = await browser.storage.local.get("apiKey");
-        const apiKey = result.apiKey as string | undefined;
+        const result = await browser.storage.local.get("authToken");
+        const token = result.authToken as string | undefined;
 
-        if (!apiKey) {
+        if (!token) {
           return;
         }
 
-        const apiClient = initializeApiClient(apiKey);
+        const apiClient = initializeApiClient(token);
         const patterns = await apiClient.getPatterns();
         setCustomPatterns(patterns);
 
@@ -523,10 +591,14 @@ const performAiScan = async (
 
     browser.storage.onChanged.addListener((changes, area) => {
       if (area === 'local') {
-        if (changes.apiKey) {
+        if (changes.authToken) {
           console.log('API key changed - reloading patterns');
-          initializeApiClient(changes.apiKey.newValue);
-          initializeCustomPatterns();
+          const newToken = changes.authToken.newValue;
+          if (newToken) {
+            authToken = newToken;
+            initializeApiClient(newToken);
+            initializeCustomPatterns();
+          }
         }
         if (changes.autoAiScan) {
           console.log('Auto AI scan setting changed:', changes.autoAiScan.newValue);

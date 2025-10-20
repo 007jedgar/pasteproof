@@ -12,11 +12,10 @@ export default defineConfig({
       'storage', // For storing user settings
       'activeTab', // Required for some interactions
     ],
+    externally_connectable: {
+      'matches': ["https://pasteproof.com"]
+    },
     host_permissions: [
-      'http://localhost:8787/*',
-      'http://localhost:3000/*',
-      'https://pasteproof-web.vercel.app',
-      'https://pasteproof-backend.jedgar.workers.dev',
       '<all_urls>', // Allows content scripts to run on all websites
     ],
     action: {

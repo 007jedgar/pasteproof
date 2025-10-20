@@ -12,15 +12,18 @@ type User = {
 type PopupState = {
   isAuthenticated: boolean;
   enabled: boolean;
+  autoAiScan: boolean;
   currentDomain: string;
   isWhitelisted: boolean;
   hasApiKey: boolean;
+  user?: any;
 };
 
 export default function PopupApp() {
   const [state, setState] = useState<PopupState>({
     isAuthenticated: false,
     enabled: true,
+    autoAiScan: false,
     currentDomain: '',
     isWhitelisted: false,
     hasApiKey: false,
@@ -33,19 +36,48 @@ export default function PopupApp() {
 
   const loadState = async () => {
     try {
-      // Get current tab domain
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       const url = new URL(tab.url || '');
       const domain = url.hostname;
 
-      // Check if extension is enabled
-      const { enabled = true } = await browser.storage.local.get('enabled');
+      const { enabled = true, autoAiScan = false, authToken, user } = 
+        await browser.storage.local.get(['enabled', 'autoAiScan', 'authToken', 'user']);
 
-      // Check if user has API key
-      const { authToken, user } = await browser.storage.local.get(['authToken', 'user']);
-      const isAuthenticated = !!(authToken && user);
+      let isAuthenticated = !!(authToken && user);
 
-      // Check if current site is whitelisted
+      if (!isAuthenticated) {
+        try {
+          const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+          if (tab.url?.includes('pasteproof.com/auth/extension')) {
+            // Inject script to read localStorage from auth page
+            const results = await browser.scripting.executeScript({
+              target: { tabId: tab.id! },
+              func: () => {
+                const token = localStorage.getItem('pasteproof_auth_token');
+                const userStr = localStorage.getItem('pasteproof_user');
+                return { token, userStr };
+              }
+            });
+            
+            if (results[0]?.result?.token) {
+              const { token, userStr } = results[0].result;
+              const userData = JSON.parse(userStr!);
+              
+              // Save to extension storage
+              await browser.storage.local.set({
+                authToken: token,
+                user: userData
+              });
+              
+              isAuthenticated = true;
+              console.log('✅ Retrieved auth from localStorage!');
+            }
+          }
+        } catch (err) {
+          console.log('Could not check auth page localStorage:', err);
+        }
+      }
+
       let isWhitelisted = false;
       if (isAuthenticated) {
         try {
@@ -65,8 +97,10 @@ export default function PopupApp() {
         isAuthenticated,
         user: user || null,
         enabled,
+        autoAiScan,
         currentDomain: domain,
         isWhitelisted,
+        hasApiKey: isAuthenticated,
       });
     } catch (error) {
       console.error('Failed to load popup state:', error);
@@ -75,28 +109,22 @@ export default function PopupApp() {
     }
   };
 
-const signIn = async () => {
-  try {
-    // Open web portal in new tab for authentication
-    const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
-    
-    await browser.tabs.create({ 
-      url: authUrl,
-      active: true 
-    });
+  const signIn = async () => {
+    try {
+      const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
+      
+      await browser.tabs.create({ 
+        url: authUrl,
+        active: true 
+      });
 
-    // Show a helpful message
-    alert('Please sign in on the opened tab. After signing in, reopen this popup to see your authenticated state.');
-    
-    // Close popup so user focuses on auth tab
-    window.close();
-    
-  } catch (error) {
-    console.error('Sign in error:', error);
-    alert('Failed to open sign in page');
-  }
-};
-
+      alert('Please sign in on the opened tab. After signing in, reopen this popup to see your authenticated state.');
+      window.close();
+    } catch (error) {
+      console.error('Sign in error:', error);
+      alert('Failed to open sign in page');
+    }
+  };
 
   const signOut = async () => {
     if (!confirm('Sign out of Paste Proof?')) return;
@@ -108,12 +136,17 @@ const signIn = async () => {
       user: null,
     });
   };
-  
 
   const toggleEnabled = async () => {
     const newEnabled = !state.enabled;
     await browser.storage.local.set({ enabled: newEnabled });
     setState({ ...state, enabled: newEnabled });
+  };
+
+  const toggleAutoAiScan = async () => {
+    const newAutoAiScan = !state.autoAiScan;
+    await browser.storage.local.set({ autoAiScan: newAutoAiScan });
+    setState({ ...state, autoAiScan: newAutoAiScan });
   };
 
   const toggleWhitelist = async () => {
@@ -124,7 +157,6 @@ const signIn = async () => {
 
     try {
       const { authToken } = await browser.storage.local.get('authToken');
-      if (!client) return;
 
       if (state.isWhitelisted) {
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist`, {
@@ -132,9 +164,8 @@ const signIn = async () => {
             'Authorization': `Bearer ${authToken}`,
           },
         });
-        // Remove from whitelist (we need to get the whitelist ID first)
-        const whitelist = await await response.json();
-        const entry = whitelist.find(w => w.domain === state.currentDomain);
+        const data = await response.json();
+        const entry = data.whitelist.find((w: any) => w.domain === state.currentDomain);
        
         if (entry) {
           await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist/${entry.id}`, {
@@ -145,7 +176,6 @@ const signIn = async () => {
           });
         }
       } else {
-        // Add to whitelist
         await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist`, {
           method: 'POST',
           headers: {
@@ -163,11 +193,6 @@ const signIn = async () => {
     }
   };
 
-  // const openOptions = (tab?: string) => {
-  //   const url = tab ? `options.html#${tab}` : 'options.html';
-  //   browser.runtime.openOptionsPage();
-  // };
-
   const openDashboard = () => {
     browser.tabs.create({ url: `${import.meta.env.VITE_WEB_URL}/dashboard` });
   };
@@ -182,17 +207,14 @@ const signIn = async () => {
 
   return (
     <div style={styles.container}>
-      {/* Header */}
       <div style={styles.header}>
-        <img src={pasteproofIcon} alt="PasteProof Logo" height={36} width={36} />
+        <div style={styles.headerIcon}>🛡️</div>
         <div>
           <div style={styles.title}>PasteProof</div>
           <div style={styles.subtitle}>Your copy/paste bodyguard</div>
         </div>
       </div>
 
-
-            {/* Not Authenticated */}
       {!state.isAuthenticated && (
         <div style={{ textAlign: 'center', padding: '20px' }}>
           <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
@@ -207,7 +229,6 @@ const signIn = async () => {
 
       {state.isAuthenticated && (
         <>
-          {/* Status Badge */}
           <div
             style={{
               ...styles.statusBadge,
@@ -230,13 +251,11 @@ const signIn = async () => {
             </span>
           </div>
 
-          {/* Current Site */}
           <div style={styles.section}>
             <div style={styles.sectionLabel}>Current Site</div>
             <div style={styles.domain}>{state.currentDomain}</div>
           </div>
 
-          {/* Controls */}
           <div style={styles.controls}>
             <button onClick={toggleEnabled} style={{ ...styles.button, ...styles.buttonPrimary }}>
               {state.enabled ? '⏸️ Disable' : '▶️ Enable'} Protection
@@ -253,7 +272,58 @@ const signIn = async () => {
             </button>
           </div>
 
-          {/* Quick Links */}
+          {/* Auto AI Scan Toggle */}
+          <div style={styles.divider} />
+          
+          <div style={styles.section}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
+                    🤖 Auto AI Scan
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '9px',
+                      backgroundColor: '#9c27b0',
+                      color: 'white',
+                      padding: '2px 5px',
+                      borderRadius: '3px',
+                      fontWeight: '600',
+                    }}
+                  >
+                    PREMIUM
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#666' }}>
+                  Automatically scan inputs with AI
+                </div>
+              </div>
+              
+              <label style={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={state.autoAiScan}
+                  onChange={toggleAutoAiScan}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span
+                  style={{
+                    ...styles.toggleSlider,
+                    backgroundColor: state.autoAiScan ? '#9c27b0' : '#ccc',
+                  }}
+                >
+                  <span
+                    style={{
+                      ...styles.toggleButton,
+                      left: state.autoAiScan ? '22px' : '2px',
+                    }}
+                  />
+                </span>
+              </label>
+            </div>
+          </div>
+
           <div style={styles.divider} />
 
           <div style={styles.links}>
@@ -276,7 +346,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '16px',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     backgroundColor: '#fafafa',
-    justifyContent: 'center',
   },
   loading: {
     textAlign: 'center',
@@ -381,5 +450,31 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: '500',
     color: '#333',
     transition: 'all 0.2s',
+  },
+  toggle: {
+    position: 'relative',
+    display: 'inline-block',
+    width: '44px',
+    height: '24px',
+  },
+  toggleSlider: {
+    position: 'absolute',
+    cursor: 'pointer',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    transition: '0.4s',
+    borderRadius: '24px',
+  },
+  toggleButton: {
+    position: 'absolute',
+    content: '',
+    height: '18px',
+    width: '18px',
+    bottom: '3px',
+    backgroundColor: 'white',
+    transition: '0.4s',
+    borderRadius: '50%',
   },
 };
