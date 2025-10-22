@@ -1,3 +1,4 @@
+// src/entrypoints/popup/App.tsx
 import { useState, useEffect } from 'react';
 import { getApiClient, initializeApiClient } from '@/shared/api-client';
 import Logo from '../../assets/icons/pasteproof-48.png'
@@ -7,7 +8,6 @@ type User = {
   email: string;
   name?: string;
 };
-
 
 type PopupState = {
   isAuthenticated: boolean;
@@ -40,8 +40,10 @@ export default function PopupApp() {
       const url = new URL(tab.url || '');
       const domain = url.hostname;
 
-      const { enabled = true, autoAiScan = false, authToken, user } = 
-        await browser.storage.local.get(['enabled', 'autoAiScan', 'authToken', 'user']);
+      const enabled = await storage.getItem<boolean>('local:enabled') ?? true;
+      const autoAiScan = await storage.getItem<boolean>('local:autoAiScan') ?? false;
+      const authToken = await storage.getItem<string>('local:authToken');
+      const user = await storage.getItem<any>('local:user');
 
       let isAuthenticated = !!(authToken && user);
 
@@ -64,10 +66,8 @@ export default function PopupApp() {
               const userData = JSON.parse(userStr!);
               
               // Save to extension storage
-              await browser.storage.local.set({
-                authToken: token,
-                user: userData
-              });
+              await storage.setItem('local:authToken', token);
+              await storage.setItem('local:user', userData);
               
               isAuthenticated = true;
               console.log('✅ Retrieved auth from localStorage!');
@@ -83,7 +83,8 @@ export default function PopupApp() {
         try {
           const response = await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist/check/${domain}`, {
             headers: {
-              'Authorization': `Bearer ${authToken}`,
+              'X-API-Key': authToken,
+              'Content-Type': 'application/json'
             },
           });
           const data = await response.json();
@@ -129,7 +130,8 @@ export default function PopupApp() {
   const signOut = async () => {
     if (!confirm('Sign out of Paste Proof?')) return;
     
-    await browser.storage.local.remove(['authToken', 'user']);
+    await storage.removeItem('local:authToken');
+    await storage.removeItem('local:user');
     setState({
       ...state,
       isAuthenticated: false,
@@ -139,13 +141,14 @@ export default function PopupApp() {
 
   const toggleEnabled = async () => {
     const newEnabled = !state.enabled;
-    await browser.storage.local.set({ enabled: newEnabled });
+    await storage.setItem('local:enabled', newEnabled);
+
     setState({ ...state, enabled: newEnabled });
   };
 
   const toggleAutoAiScan = async () => {
     const newAutoAiScan = !state.autoAiScan;
-    await browser.storage.local.set({ autoAiScan: newAutoAiScan });
+    await storage.setItem('local:autoAiScan', newAutoAiScan);
     setState({ ...state, autoAiScan: newAutoAiScan });
   };
 
@@ -156,12 +159,13 @@ export default function PopupApp() {
     }
 
     try {
-      const { authToken } = await browser.storage.local.get('authToken');
+      const authToken = await storage.getItem<string>('local:authToken');
+
 
       if (state.isWhitelisted) {
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist`, {
           headers: {
-            'Authorization': `Bearer ${authToken}`,
+            'X-API-Key': authToken as string,
           },
         });
         const data = await response.json();
@@ -171,7 +175,7 @@ export default function PopupApp() {
           await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist/${entry.id}`, {
             method: 'DELETE',
             headers: {
-              'Authorization': `Bearer ${authToken}`,
+              'X-API-Key': authToken as string,
             },
           });
         }
@@ -180,7 +184,7 @@ export default function PopupApp() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`,
+            'X-API-Key': authToken as string,
           },
           body: JSON.stringify({ domain: state.currentDomain }),
         });
@@ -208,7 +212,7 @@ export default function PopupApp() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <div style={styles.headerIcon}>🛡️</div>
+        <img src={PasteproofIcon} width={35} height={35} />
         <div>
           <div style={styles.title}>PasteProof</div>
           <div style={styles.subtitle}>Your copy/paste bodyguard</div>
