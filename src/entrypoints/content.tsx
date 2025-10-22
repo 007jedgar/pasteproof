@@ -1,3 +1,4 @@
+// src/entrypoints/content.tsx
 import {
   detectPii,
   DetectionResult,
@@ -21,24 +22,81 @@ const CACHE_DURATION = 30000; // 30 seconds
 const MIN_TEXT_LENGTH = 10;
 const MAX_TEXT_LENGTH = 5000;
 
+// Detection queue for batch logging
+class DetectionQueue {
+  private queue: Array<{
+    type: string;
+    domain: string;
+    action: 'detected' | 'blocked' | 'anonymized';
+    metadata?: Record<string, any>;
+  }> = [];
+  private processing = false;
+  private readonly BATCH_SIZE = 10;
+  private readonly FLUSH_INTERVAL = 5000; // 5 seconds
+
+  constructor() {
+    // Auto-flush periodically
+    setInterval(() => this.flush(), this.FLUSH_INTERVAL);
+  }
+
+  add(detection: {
+    type: string;
+    domain: string;
+    action: 'detected' | 'blocked' | 'anonymized';
+    metadata?: Record<string, any>;
+  }) {
+    this.queue.push(detection);
+    
+    // Flush if queue gets large
+    if (this.queue.length >= this.BATCH_SIZE) {
+      this.flush();
+    }
+  }
+
+  async flush() {
+    if (this.processing || this.queue.length === 0) return;
+
+    this.processing = true;
+
+    try {
+      const apiClient = getApiClient();
+      if (!apiClient) {
+        this.processing = false;
+        return;
+      }
+
+      const batch = this.queue.splice(0, this.BATCH_SIZE);
+      
+      try {
+        await apiClient.logDetectionsBatch(batch);
+        console.log(`Logged ${batch.length} detections`);
+      } catch (error) {
+        console.warn('Failed to log detections batch:', error);
+        // Don't re-queue on failure to avoid infinite loops
+      }
+    } finally {
+      this.processing = false;
+    }
+  }
+}
+
+const detectionQueue = new DetectionQueue();
+
 export default defineContentScript({
   matches: ['<all_urls>'],
 
   async main(ctx) {
-    const storage = await browser.storage.local.get(['authToken', 'enabled', 'autoAiScan']);
-    authToken = storage.authToken || null;
-
-
-      const enabled = storage.enabled !== false;
-    const autoAiScan = storage.autoAiScan !== false; // Default to true
-
+    let authToken = await storage.getItem<string>('local:authToken');
+    const enabled = await storage.getItem<boolean>('local:enabled') ?? true;
+    const autoAiScan = await storage.getItem<boolean>('local:autoAiScan') ?? true;
+    console.log('extension enabled:', enabled);
     if (!enabled) {
       console.log('Paste Proof is disabled');
       return;
     }
 
-        // ============================================
-    // AUTH LISTENERS (ONLY HERE, NOT OUTSIDE!)
+    // ============================================
+    // AUTH LISTENERS
     // ============================================
     
     window.addEventListener('message', async (event) => {
@@ -50,10 +108,8 @@ export default defineContentScript({
       if (event.data.type === 'PASTEPROOF_AUTH_SUCCESS') {
         console.log('✅ Received auth from web page!', event.data);
         
-        await browser.storage.local.set({
-          authToken: event.data.authToken,
-          user: event.data.user,
-        });
+        await storage.setItem('local:authToken', event.data.authToken);
+        await storage.setItem('local:user', event.data.user);
         
         console.log('✅ Auth saved to extension storage');
         authToken = event.data.authToken;
@@ -65,10 +121,8 @@ export default defineContentScript({
     window.addEventListener('pasteproof-auth', async (event: any) => {
       const { authToken: token, user } = event.detail;
       
-      await browser.storage.local.set({
-        authToken: token,
-        user,
-      });
+      await storage.setItem('local:authToken', token);
+      await storage.setItem('local:user', user);
       
       console.log('✅ Auth saved via custom event');
       authToken = token;
@@ -111,7 +165,7 @@ export default defineContentScript({
           `${import.meta.env.VITE_API_URL}/api/whitelist/check/${currentDomain}`,
           {
             headers: {
-              'Authorization': `Bearer ${authToken}`,
+              'X-API-Key': authToken,
             },
           }
         );
@@ -131,19 +185,16 @@ export default defineContentScript({
     let badgeContainer: HTMLDivElement | null = null;
     let badgeRoot: Root | null = null;
     let isPopupOpen = false;
-    let lastScannedText = ''; // Track last scanned text for optimization
+    let lastScannedText = '';
 
-
-        // Helper function to check if text should be scanned
+    // Helper function to check if text should be scanned
     const shouldScanText = (text: string): boolean => {
       if (!text || text.trim().length < MIN_TEXT_LENGTH) return false;
       if (text.length > MAX_TEXT_LENGTH) return false;
       
-      // Don't scan if mostly whitespace
       const trimmed = text.trim();
       if (trimmed.length < MIN_TEXT_LENGTH) return false;
       
-      // Don't scan very repetitive text
       const uniqueChars = new Set(text).size;
       if (uniqueChars < 5 && text.length > 20) return false;
       
@@ -199,7 +250,7 @@ export default defineContentScript({
           return detection.value.replace(/(\d)/g, (match, _, offset) => {
             const digitsToEnd = (
               detection.value.substring(offset).match(/\d/g) || []
-            ).length;
+        ).length;
             return digitsToEnd > 4 ? '•' : match;
           });
         default:
@@ -220,27 +271,50 @@ export default defineContentScript({
         newValue = newValue.replace(d.value, anonymized);
       });
 
-      activeInput.value = newValue;
-      activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value'
+      )?.set;
 
-      const apiClient = getApiClient();
-      if (apiClient) {
-        const domain = window.location.hostname;
-        for (const detection of detections) {
-          await apiClient.logEvent({
-            event_type: 'anonymization',
-            domain,
-            pii_type: detection.type,
-            was_anonymized: true,
-          });
-        }
+      const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      )?.set;
+
+      if (activeInput.tagName === 'INPUT' && nativeInputValueSetter) {
+        nativeInputValueSetter.call(activeInput, newValue);
+      } else if (activeInput.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
+        nativeTextAreaValueSetter.call(activeInput, newValue);
+      } else {
+        activeInput.value = newValue;
       }
+
+      // Dispatch input event but DON'T dispatch submit/change
+      activeInput.dispatchEvent(new InputEvent('input', { 
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText'
+      }));
+
+      // Log anonymizations
+      const domain = window.location.hostname;
+      sortedDetections.forEach(detection => {
+        detectionQueue.add({
+          type: detection.type,
+          domain,
+          action: 'anonymized',
+          metadata: {
+            originalLength: detection.value.length,
+            pattern: detection.patternName,
+          }
+        });
+      });
 
       const results = detectPii(newValue);
       handleDetection(results);
     };
 
-       // Helper function to create cache key
+    // Helper function to create cache key
     const getCacheKey = (text: string): string => {
       let hash = 0;
       for (let i = 0; i < text.length; i++) {
@@ -250,68 +324,81 @@ export default defineContentScript({
       }
       return hash.toString(36);
     };
-  
 
-// NEW: Perform AI scan on input with optimization
-const performAiScan = async (
-  input: HTMLElement,
-  text: string
-): Promise<any[] | null> => {
-  // Check if text should be scanned
-  if (!shouldScanText(text)) {
-    return null;
-  }
-
-  // Check cache first
-  const cacheKey = getCacheKey(text);
-  const cached = aiScanCache.get(cacheKey);
-  
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    console.log('Using cached AI scan result');
-    return cached.detections;
-  }
-
-  try {
-    const apiClient = getApiClient();
-    if (!apiClient) {
-      console.log('No API client - skipping AI scan');
-      return null;
-    }
-
-    console.log('Performing AI scan on input...');
-    const result = await apiClient.analyzeContext(
-      text,
-      window.location.hostname
-    );
-
-    const detections = result.detections || [];
-    
-    // Cache the results
-    aiScanCache.set(cacheKey, {
-      detections,
-      timestamp: Date.now(),
-    });
-
-    // Clean old cache entries
-    for (const [key, entry] of aiScanCache.entries()) {
-      if (Date.now() - entry.timestamp > CACHE_DURATION) {
-        aiScanCache.delete(key);
+    // Perform AI scan on input with optimization
+    const performAiScan = async (
+      input: HTMLElement,
+      text: string
+    ): Promise<any[] | null> => {
+      if (!shouldScanText(text)) {
+        return null;
       }
-    }
 
-    return detections;
-  } catch (error: any) {
-    console.error('AI scan error:', error);
-    // Don't show errors for rate limits or subscription issues
-    if (
-      error.message?.includes('Premium subscription required') ||
-      error.message?.includes('Rate limit exceeded')
-    ) {
-      console.log('AI scan not available:', error.message);
-    }
-    return null;
-  }
-};
+      const cacheKey = getCacheKey(text);
+      const cached = aiScanCache.get(cacheKey);
+      
+      if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        console.log('Using cached AI scan result');
+        return cached.detections;
+      }
+
+      try {
+        const apiClient = getApiClient();
+        if (!apiClient) {
+          console.log('No API client - skipping AI scan');
+          return null;
+        }
+
+        console.log('Performing AI scan on input...');
+        const result = await apiClient.analyzeContext(
+          text,
+          window.location.hostname
+        );
+
+        const detections = result.detections || [];
+        
+        // Log AI detections
+        if (detections.length > 0) {
+          const domain = window.location.hostname;
+          detections.forEach((detection: any) => {
+            detectionQueue.add({
+              type: detection.type,
+              domain,
+              action: 'detected',
+              metadata: {
+                confidence: detection.confidence,
+                reason: detection.reason,
+                risk_level: result.risk_level,
+                source: 'ai',
+              }
+            });
+          });
+        }
+        
+        aiScanCache.set(cacheKey, {
+          detections,
+          timestamp: Date.now(),
+        });
+
+        // Clean old cache entries
+        for (const [key, entry] of aiScanCache.entries()) {
+          if (Date.now() - entry.timestamp > CACHE_DURATION) {
+            aiScanCache.delete(key);
+          }
+        }
+
+        return detections;
+      } catch (error: any) {
+        console.error('AI scan error:', error);
+        if (
+          error.message?.includes('Premium subscription required') ||
+          error.message?.includes('Rate limit exceeded')
+        ) {
+          console.log('AI scan not available:', error.message);
+        }
+        return null;
+      }
+    };
 
     const createBadgeContainer = (
       input: HTMLInputElement | HTMLTextAreaElement
@@ -379,19 +466,21 @@ const performAiScan = async (
       detections: DetectionResult[],
       aiDetections: any[] | null = null
     ) => {
+      // Log pattern-based detections
       if (detections.length > 0 && !badgeContainer) {
-        const apiClient = getApiClient();
-        if (apiClient) {
-          const domain = window.location.hostname;
-          for (const detection of detections) {
-            await apiClient.logEvent({
-              event_type: 'detection',
-              domain,
-              pii_type: detection.type,
-              was_anonymized: false,
-            });
-          }
-        }
+        const domain = window.location.hostname;
+        detections.forEach(detection => {
+          detectionQueue.add({
+            type: detection.type,
+            domain,
+            action: 'detected',
+            metadata: {
+              confidence: detection.confidence,
+              pattern: detection.patternName,
+              source: 'pattern',
+            }
+          });
+        });
       }
 
       if (detections.length > 0 && activeInput) {
@@ -455,25 +544,22 @@ const performAiScan = async (
       return '';
     };
 
-    // MODIFIED: Debounced scan now includes AI scan with optimization
+    // Debounced scan with AI scan and optimization
     const debouncedScan = debounce(async (text: string, input: HTMLElement) => {
       const results = detectPii(text);
       
-      // Perform AI scan if enabled, text is long enough, and has changed significantly
       let aiDetections: any[] | null = null;
       if (autoAiScan && aiScanOptimizer.shouldScan(text)) {
-        // Only scan if text has changed significantly from last scan
         if (aiScanOptimizer.hasSignificantChange(lastScannedText, text)) {
           aiDetections = await performAiScan(input, text);
           lastScannedText = text;
         } else {
-          // Use cached result
           aiDetections = aiScanOptimizer.getCachedResult(text);
         }
       }
       
       handleDetection(results, aiDetections);
-    }, 800); // Slightly longer debounce for AI scan
+    }, 800);
 
     const attachInputListener = (
       input: HTMLInputElement | HTMLTextAreaElement | HTMLElement
@@ -504,7 +590,6 @@ const performAiScan = async (
         const currentValue = getInputValue(activeInput);
         const results = detectPii(currentValue);
         
-        // Perform immediate AI scan if enabled
         let aiDetections: any[] | null = null;
         if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
           aiDetections = await performAiScan(activeInput, currentValue);
@@ -566,23 +651,37 @@ const performAiScan = async (
       }
     });
 
+    // Flush detection queue before unload
     ctx.onInvalidated(() => {
       removeBadge();
       aiScanOptimizer.clearCache();
+      detectionQueue.flush();
     });
 
     async function initializeCustomPatterns() {
       try {
-        const result = await browser.storage.local.get("authToken");
-        const token = result.authToken as string | undefined;
+        const token = await storage.getItem<string>('local:authToken');
 
         if (!token) {
+          console.log('No auth token, skipping custom patterns');
           return;
         }
 
         const apiClient = initializeApiClient(token);
-        const patterns = await apiClient.getPatterns();
-        setCustomPatterns(patterns);
+        
+        try {
+          const patterns = await apiClient.getPatterns();
+          console.log('Loaded custom patterns:', patterns);
+          
+          if (patterns && patterns.length > 0) {
+            setCustomPatterns(patterns);
+            console.log(`✅ ${patterns.length} custom patterns loaded`);
+          } else {
+            console.log('No custom patterns found');
+          }
+        } catch (apiError) {
+          console.error("Failed to fetch patterns from API:", apiError);
+        }
 
       } catch (error) {
         console.error("Failed to load custom patterns:", error);

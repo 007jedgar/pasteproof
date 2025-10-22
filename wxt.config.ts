@@ -13,7 +13,12 @@ export default defineConfig({
       'activeTab', // Required for some interactions
     ],
     externally_connectable: {
-      'matches': ["https://pasteproof.com"]
+      matches: [
+        "https://pasteproof.com/*",
+        "https://*.pasteproof.com/*",
+        "http://localhost:*/*",
+        "https://*.vercel.app/*"
+      ]
     },
     host_permissions: [
       '<all_urls>', // Allows content scripts to run on all websites

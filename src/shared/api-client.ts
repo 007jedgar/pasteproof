@@ -1,3 +1,4 @@
+// src/shared/api-client.ts
 import { CustomPattern } from './pii-detector';
 
 const API_BASE_URL = 'https://pasteproof-backend.jedgar.workers.dev'; // Change to production URL later
@@ -79,7 +80,7 @@ export class PasteProofApiClient {
         .catch(() => ({ error: 'Unknown error' }));
       throw new Error(error.error || `API error: ${response.status}`);
     }
-
+    console.log('response', response);
     return response.json();
   }
 
@@ -233,6 +234,38 @@ export class PasteProofApiClient {
   }> {
     return this.fetch('/api/user');
   }
+
+  async logDetection(detection: {
+  type: string;
+  domain: string;
+  action?: 'detected' | 'blocked' | 'anonymized';
+  metadata?: Record<string, any>;
+}): Promise<void> {
+  try {
+    await this.fetch('/api/detections', {
+      method: 'POST',
+      body: JSON.stringify(detection),
+    });
+  } catch (error) {
+    console.warn('Failed to log detection:', error);
+  }
+}
+
+async logDetectionsBatch(detections: Array<{
+  type: string;
+  domain: string;
+  action?: 'detected' | 'blocked' | 'anonymized';
+  metadata?: Record<string, any>;
+}>): Promise<void> {
+  try {
+    await this.fetch('/api/detections/batch', {
+      method: 'POST',
+      body: JSON.stringify({ detections }),
+    });
+  } catch (error) {
+    console.warn('Failed to log detections batch:', error);
+  }
+}
 }
 
 // Singleton instance

@@ -25,7 +25,7 @@ export function SimpleWarningBadge({
   const [activeTab, setActiveTab] = useState<'regex' | 'ai'>(
     initialAiDetections && initialAiDetections.length > 0 ? 'ai' : 'regex'
   );
-
+  const [_, setSuccess] = useState<string>('')
   // Update AI detections when prop changes
   useEffect(() => {
     if (initialAiDetections) {
@@ -68,10 +68,12 @@ export function SimpleWarningBadge({
         window.location.hostname
       );
 
-      setAiDetections(result.detections);
+       setAiDetections(result?.detections || [])
       
-      if (result.detections.length === 0) {
-        setAiError('No additional PII detected by AI');
+      if (result && result.detections && result.detections.length > 0) {
+        setSuccess(`Found ${result.detections.length} potential issue${result.detections.length !== 1 ? 's' : ''}`);
+      } else {
+        setSuccess('No sensitive information detected by AI');
       }
     } catch (error: any) {
       console.error('AI scan error:', error);

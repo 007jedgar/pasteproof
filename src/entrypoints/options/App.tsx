@@ -1,3 +1,4 @@
+// src/entrypoints/options/App.tsx
 import { useState, useEffect } from 'react';
 import { initializeApiClient, getApiClient, WhitelistSite } from '@/shared/api-client';
 import { CustomPattern } from '@/shared/pii-detector';
@@ -5,8 +6,8 @@ import Dashboard from './Dashboard';
 import Logo from '../../assets/icons/pasteproof-48.png'
 
 export default function OptionsApp() {
-  const [apiKey, setApiKey] = useState('');
-  const [savedApiKey, setSavedApiKey] = useState('');
+  const [authToken, setAuthToken] = useState('');
+  const [savedAuthToken, setSavedAuthToken] = useState('');
   const [patterns, setPatterns] = useState<CustomPattern[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -15,6 +16,7 @@ export default function OptionsApp() {
   const [newDomain, setNewDomain] = useState('');
   const [autoAiScan, setAutoAiScan] = useState(false);
   const [extensionEnabled, setExtensionEnabled] = useState(true);
+  const [userEmail, setUserEmail] = useState('');
 
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '');
@@ -53,9 +55,9 @@ export default function OptionsApp() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const loadWhitelist = async (key: string) => {
+  const loadWhitelist = async (token: string) => {
     try {
-      const client = initializeApiClient(key);
+      const client = initializeApiClient(token);
       const sites = await client.getWhitelist();
       setWhitelist(sites);
     } catch (err) {
@@ -64,20 +66,29 @@ export default function OptionsApp() {
   };
 
   const loadSettings = async () => {
-    const result = await browser.storage.local.get(['apiKey', 'autoAiScan', 'enabled']);
-    const key = result.apiKey as string | undefined;
+    const token = await storage.getItem<string>('local:authToken');
+    console.log('token', token)
+    const autoAiScan = await storage.getItem<boolean>('local:autoAiScan') ?? false;
+    const enabled = await storage.getItem<boolean>('local:enabled') ?? true;
+    const user = await storage.getItem<any>('local:user');
 
-    if (key) {
-      setApiKey(key);
-      setSavedApiKey(key);
+    if (token) {
+      setAuthToken(token);
+      setSavedAuthToken(token);
+      
+      // Load user info
+      if (user) {
+        setUserEmail(user.email || '');
+      }
+
       await Promise.all([
-        loadPatterns(key),
-        loadWhitelist(key)
+        loadPatterns(token),
+        loadWhitelist(token)
       ]);
     }
 
-    setAutoAiScan(result.autoAiScan !== false);
-    setExtensionEnabled(result.enabled !== false);
+    setAutoAiScan(autoAiScan !== false);
+    setExtensionEnabled(enabled !== false);
   };
 
   const addDomain = async () => {
@@ -87,14 +98,14 @@ export default function OptionsApp() {
 
       const client = getApiClient();
       if (!client) {
-        setError('Please save your API key first');
+        setError('Please sign in first');
         return;
       }
 
       await client.addToWhitelist(newDomain);
       setSuccess('✅ Domain added to whitelist!');
       setNewDomain('');
-      await loadWhitelist(savedApiKey);
+      await loadWhitelist(savedAuthToken);
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(`Failed to add domain: ${err}`);
@@ -112,7 +123,7 @@ export default function OptionsApp() {
       if (!client) return;
 
       await client.removeFromWhitelist(whitelistId);
-      await loadWhitelist(savedApiKey);
+      await loadWhitelist(savedAuthToken);
       setSuccess('✅ Domain removed!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -122,51 +133,50 @@ export default function OptionsApp() {
     }
   };
 
-  const loadPatterns = async (key: string) => {
+  const loadPatterns = async (token: string) => {
     try {
       setLoading(true);
-      const client = initializeApiClient(key);
+      const client = initializeApiClient(token);
       const fetchedPatterns = await client.getPatterns();
       setPatterns(fetchedPatterns);
     } catch (err) {
+      console.error('Failed to load patterns:', err);
       setError(`Failed to load patterns: ${err}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const saveApiKey = async () => {
-    try {
-      setLoading(true);
-      setError('');
+  const openAuthPage = () => {
+    const authUrl = 'https://pasteproof.com/auth/signin?extension=true';
+    browser.tabs.create({ url: authUrl });
+  };
 
-      const client = initializeApiClient(apiKey);
-      await client.getUserInfo();
+  const signOut = async () => {
+    if (!confirm('Sign out of Paste Proof?')) return;
 
-      await browser.storage.local.set({ apiKey });
-      setSavedApiKey(apiKey);
-      setSuccess('✅ API key saved successfully!');
-
-      await loadPatterns(apiKey);
-
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(`Invalid API key: ${err}`);
-    } finally {
-      setLoading(false);
-    }
+    await storage.removeItem('local:authToken');
+    await storage.removeItem('local:user');
+    setAuthToken('');
+    setSavedAuthToken('');
+    setUserEmail('');
+    setPatterns([]);
+    setWhitelist([]);
+    setSuccess('✅ Signed out successfully');
+    setTimeout(() => setSuccess(''), 3000);
   };
 
   const toggleAutoAiScan = async (checked: boolean) => {
     setAutoAiScan(checked);
-    await browser.storage.local.set({ autoAiScan: checked });
+    await storage.setItem('local:autoAiScan', checked);
+
     setSuccess('✅ Auto AI Scan ' + (checked ? 'enabled' : 'disabled'));
     setTimeout(() => setSuccess(''), 2000);
   };
 
   const toggleExtensionEnabled = async (checked: boolean) => {
     setExtensionEnabled(checked);
-    await browser.storage.local.set({ enabled: checked });
+    await storage.setItem('local:enabled', checked);
     
     const tabs = await browser.tabs.query({});
     for (const tab of tabs) {
@@ -186,7 +196,7 @@ export default function OptionsApp() {
 
       const client = getApiClient();
       if (!client) {
-        setError('Please save your API key first');
+        setError('Please sign in first');
         return;
       }
 
@@ -207,7 +217,7 @@ export default function OptionsApp() {
         description: '',
       });
 
-      await loadPatterns(savedApiKey);
+      await loadPatterns(savedAuthToken);
 
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -226,7 +236,7 @@ export default function OptionsApp() {
       if (!client) return;
 
       await client.deletePattern(patternId);
-      await loadPatterns(savedApiKey);
+      await loadPatterns(savedAuthToken);
       setSuccess('✅ Pattern deleted!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -251,7 +261,77 @@ export default function OptionsApp() {
           <h1 style={{ margin: 0 }}>Paste Proof</h1>
           <p style={{ margin: '4px 0 0 0', color: '#666' }}>Your pasteboard bodyguard</p>
         </div>
+
+        {/* User info / Sign in button */}
+        {savedAuthToken ? (
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>
+              Signed in as
+            </div>
+            <div style={{ fontWeight: '600', marginBottom: '8px' }}>{userEmail}</div>
+            <button
+              onClick={signOut}
+              style={{
+                padding: '6px 12px',
+                fontSize: '13px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                backgroundColor: 'white',
+                cursor: 'pointer',
+              }}
+            >
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={openAuthPage}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#ff9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '600',
+            }}
+          >
+            Sign In
+          </button>
+        )}
       </div>
+
+      {/* Show messages */}
+      {error && (
+        <div
+          style={{
+            padding: '12px',
+            marginBottom: '20px',
+            backgroundColor: '#ffebee',
+            color: '#c62828',
+            borderRadius: '4px',
+            border: '1px solid #ef9a9a',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div
+          style={{
+            padding: '12px',
+            marginBottom: '20px',
+            backgroundColor: '#e8f5e9',
+            color: '#2e7d32',
+            borderRadius: '4px',
+            border: '1px solid #81c784',
+          }}
+        >
+          {success}
+        </div>
+      )}
 
       <div
         style={{
@@ -270,21 +350,21 @@ export default function OptionsApp() {
         <TabButton
           active={activeTab === 'whitelist'}
           onClick={() => setActiveTab('whitelist')}
-          disabled={!savedApiKey}
+          disabled={!savedAuthToken}
         >
           ✓ Whitelisted Sites
         </TabButton>
         <TabButton
           active={activeTab === 'patterns'}
           onClick={() => setActiveTab('patterns')}
-          disabled={!savedApiKey}
+          disabled={!savedAuthToken}
         >
           🔍 Custom Patterns
         </TabButton>
         <TabButton
           active={activeTab === 'dashboard'}
           onClick={() => setActiveTab('dashboard')}
-          disabled={!savedApiKey}
+          disabled={!savedAuthToken}
         >
           📊 Dashboard
         </TabButton>
@@ -292,6 +372,41 @@ export default function OptionsApp() {
 
       {activeTab === 'settings' && (
         <>
+          {/* Sign In Prompt */}
+          {!savedAuthToken && (
+            <div
+              style={{
+                marginBottom: '24px',
+                padding: '30px',
+                border: '2px dashed #ff9800',
+                borderRadius: '8px',
+                backgroundColor: '#fff3e0',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔐</div>
+              <h2 style={{ margin: '0 0 8px 0' }}>Sign in to unlock Premium features</h2>
+              <p style={{ color: '#666', marginBottom: '20px' }}>
+                Get access to custom patterns, AI detection, analytics, and more
+              </p>
+              <button
+                onClick={openAuthPage}
+                style={{
+                  padding: '12px 32px',
+                  backgroundColor: '#ff9800',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                }}
+              >
+                Sign In with Paste Proof
+              </button>
+            </div>
+          )}
+
           {/* Extension Enable/Disable */}
           <div
             style={{
@@ -329,63 +444,8 @@ export default function OptionsApp() {
             </div>
           </div>
 
-          {/* API Key Section */}
-          <div
-            style={{
-              marginBottom: '24px',
-              padding: '20px',
-              border: '1px solid #ddd',
-              borderRadius: '8px',
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>API Key</h2>
-            <p style={{ color: '#666' }}>
-              Enter your API key to enable Premium features (custom patterns, AI
-              detection, audit logs)
-            </p>
-
-            <input
-              type="password"
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder="pk_test_..."
-              style={{
-                width: '100%',
-                padding: '10px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                marginBottom: '10px',
-                boxSizing: 'border-box',
-              }}
-            />
-
-            <button
-              onClick={saveApiKey}
-              disabled={loading || !apiKey}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: '#ff9800',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                fontSize: '14px',
-                fontWeight: '600',
-              }}
-            >
-              {loading ? 'Saving...' : 'Save API Key'}
-            </button>
-
-            {savedApiKey && (
-              <p style={{ marginTop: '10px', color: '#4caf50', fontSize: '14px' }}>
-                ✅ API key configured
-              </p>
-            )}
-          </div>
-
           {/* Auto AI Scan Setting */}
-          {savedApiKey && (
+          {savedAuthToken && (
             <div
               style={{
                 marginBottom: '24px',
@@ -395,40 +455,23 @@ export default function OptionsApp() {
                 backgroundColor: '#f3e5f5',
               }}
             >
-              <h2 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                🤖 AI Detection Settings
-                <span
-                  style={{
-                    fontSize: '11px',
-                    backgroundColor: '#9c27b0',
-                    color: 'white',
-                    padding: '3px 8px',
-                    borderRadius: '4px',
-                    fontWeight: '600',
-                  }}
-                >
-                  PREMIUM
-                </span>
-              </h2>
-
+              <h2 style={{ marginTop: 0 }}>AI Detection</h2>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  padding: '16px',
+                  padding: '12px',
                   backgroundColor: 'white',
                   borderRadius: '6px',
-                  marginBottom: '16px',
                 }}
               >
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: '600', marginBottom: '6px', fontSize: '15px' }}>
-                    Auto AI Scan
+                <div>
+                  <div style={{ fontWeight: '600', marginBottom: '4px' }}>
+                    Automatic AI Scanning
                   </div>
-                  <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
-                    Automatically scan inputs with AI for additional PII detection.
-                    Results are cached for 30 seconds to minimize API calls.
+                  <div style={{ fontSize: '13px', color: '#666' }}>
+                    Use AI to detect sensitive information automatically
                   </div>
                 </div>
                 <ToggleSwitch
@@ -437,125 +480,35 @@ export default function OptionsApp() {
                   color="#9c27b0"
                 />
               </div>
-
-              <div
-                style={{
-                  padding: '12px',
-                  backgroundColor: '#fff3cd',
-                  borderLeft: '4px solid #ffc107',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  color: '#856404',
-                }}
-              >
-                <strong>ℹ️ Daily AI Scan Limits:</strong>
-                <div style={{ marginTop: '6px', lineHeight: '1.6' }}>
-                  • Free: 10 scans/day<br />
-                  • Premium: 100 scans/day<br />
-                  • Enterprise: 1000 scans/day
-                </div>
-              </div>
             </div>
           )}
         </>
       )}
 
-      {activeTab === 'patterns' && savedApiKey && (
-        <>
-          <div
-            style={{
-              marginBottom: '40px',
-              padding: '20px',
-              border: '1px solid #ddd',
-              borderRadius: '8px',
-            }}
-          >
-            <h2>Create Custom Pattern</h2>
+      {activeTab === 'whitelist' && (
+        <div>
+          <h2>Whitelisted Sites</h2>
+          <p style={{ color: '#666' }}>
+            Sites on this list will bypass PII detection
+          </p>
 
+          <div style={{ marginBottom: '20px', display: 'flex', gap: '8px' }}>
             <input
               type="text"
-              placeholder="Pattern name (e.g., Employee ID)"
-              value={newPattern.name}
-              onChange={e =>
-                setNewPattern({ ...newPattern, name: e.target.value })
-              }
+              value={newDomain}
+              onChange={e => setNewDomain(e.target.value)}
+              placeholder="example.com"
               style={{
-                width: '100%',
+                flex: 1,
                 padding: '10px',
-                fontSize: '14px',
                 border: '1px solid #ddd',
                 borderRadius: '4px',
-                marginBottom: '10px',
-                boxSizing: 'border-box',
-              }}
-            />
-
-            <input
-              type="text"
-              placeholder="Regex pattern (e.g., EMP-\d{6})"
-              value={newPattern.pattern}
-              onChange={e =>
-                setNewPattern({ ...newPattern, pattern: e.target.value })
-              }
-              style={{
-                width: '100%',
-                padding: '10px',
                 fontSize: '14px',
-                fontFamily: 'monospace',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                marginBottom: '10px',
-                boxSizing: 'border-box',
               }}
             />
-
-            <input
-              type="text"
-              placeholder="Type (e.g., EMPLOYEE_ID)"
-              value={newPattern.pattern_type}
-              onChange={e =>
-                setNewPattern({
-                  ...newPattern,
-                  pattern_type: e.target.value.toUpperCase(),
-                })
-              }
-              style={{
-                width: '100%',
-                padding: '10px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                marginBottom: '10px',
-                boxSizing: 'border-box',
-              }}
-            />
-
-            <textarea
-              placeholder="Description (optional)"
-              value={newPattern.description}
-              onChange={e =>
-                setNewPattern({ ...newPattern, description: e.target.value })
-              }
-              style={{
-                width: '100%',
-                padding: '10px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                marginBottom: '10px',
-                minHeight: '60px',
-                boxSizing: 'border-box',
-              }}
-            />
-
             <button
-              onClick={createPattern}
-              disabled={
-                loading ||
-                !newPattern.name ||
-                !newPattern.pattern ||
-                !newPattern.pattern_type
-              }
+              onClick={addDomain}
+              disabled={loading || !newDomain}
               style={{
                 padding: '10px 20px',
                 backgroundColor: '#4caf50',
@@ -567,210 +520,208 @@ export default function OptionsApp() {
                 fontWeight: '600',
               }}
             >
-              {loading ? 'Creating...' : 'Create Pattern'}
+              Add Domain
             </button>
           </div>
 
-          <div style={{ marginBottom: '40px' }}>
-            <h2>Your Custom Patterns ({patterns.length})</h2>
-
-            {patterns.length === 0 ? (
-              <p style={{ color: '#666' }}>
-                No custom patterns yet. Create one above!
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {whitelist.length === 0 ? (
+              <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+                No whitelisted sites yet
               </p>
             ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                {patterns.map(pattern => (
-                  <div
-                    key={pattern.id}
+              whitelist.map(site => (
+                <div
+                  key={site.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '12px 16px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    backgroundColor: 'white',
+                  }}
+                >
+                  <span style={{ fontWeight: '500' }}>{site.domain}</span>
+                  <button
+                    onClick={() => removeDomain(site.id)}
                     style={{
-                      padding: '15px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
-                      backgroundColor: '#f9f9f9',
+                      padding: '6px 12px',
+                      backgroundColor: '#f44336',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
                     }}
                   >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'start',
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <h3 style={{ margin: '0 0 5px 0' }}>{pattern.name}</h3>
-                        <code
-                          style={{
-                            backgroundColor: '#fff',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            fontSize: '13px',
-                          }}
-                        >
-                          {pattern.pattern}
-                        </code>
-                        <p
-                          style={{
-                            margin: '8px 0 0 0',
-                            color: '#666',
-                            fontSize: '14px',
-                          }}
-                        >
-                          Type: <strong>{pattern.pattern_type}</strong>
-                        </p>
-                        {pattern.description && (
-                          <p
-                            style={{
-                              margin: '5px 0 0 0',
-                              color: '#666',
-                              fontSize: '13px',
-                            }}
-                          >
-                            {pattern.description}
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => deletePattern(pattern.id)}
-                        style={{
-                          padding: '6px 12px',
-                          backgroundColor: '#f44336',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    Remove
+                  </button>
+                </div>
+              ))
             )}
           </div>
-        </>
-      )}
-
-      {activeTab === 'dashboard' && savedApiKey && <Dashboard />}
-
-      {activeTab === 'dashboard' && !savedApiKey && (
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔐</div>
-          <p style={{ color: '#666', marginBottom: '16px' }}>
-            Please configure your API key in Settings to view the dashboard
-          </p>
-          <button
-            onClick={() => setActiveTab('settings')}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#ff9800',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '600',
-            }}
-          >
-            Go to Settings
-          </button>
         </div>
       )}
 
-      {activeTab === 'whitelist' && savedApiKey && (
-        <>
+      {activeTab === 'patterns' && (
+        <div>
+          <h2>Custom Patterns</h2>
+          <p style={{ color: '#666' }}>
+            Create custom regex patterns to detect specific types of sensitive data
+          </p>
+
           <div
             style={{
-              marginBottom: '40px',
-              padding: '20px',
+              marginBottom: '20px',
+              padding: '16px',
               border: '1px solid #ddd',
-              borderRadius: '8px',
+              borderRadius: '4px',
+              backgroundColor: '#f9f9f9',
             }}
           >
-            <h2>Add Site to Whitelist</h2>
-            <p style={{ color: '#666', fontSize: '14px', marginBottom: '16px' }}>
-              Paste Proof will not scan for PII on whitelisted sites. Use this for trusted internal tools.
-            </p>
-
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="example.com"
-                value={newDomain}
-                onChange={e => setNewDomain(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '10px',
-                  fontSize: '14px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                }}
-              />
-              <button
-                onClick={addDomain}
-                disabled={loading || !newDomain}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#4caf50',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: loading || !newDomain ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                }}
-              >
-                Add
-              </button>
-            </div>
+            <h3 style={{ marginTop: 0 }}>Create New Pattern</h3>
+            <input
+              type="text"
+              value={newPattern.name}
+              onChange={e =>
+                setNewPattern({ ...newPattern, name: e.target.value })
+              }
+              placeholder="Pattern Name"
+              style={{
+                width: '100%',
+                padding: '10px',
+                marginBottom: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+            <input
+              type="text"
+              value={newPattern.pattern}
+              onChange={e =>
+                setNewPattern({ ...newPattern, pattern: e.target.value })
+              }
+              placeholder="Regex Pattern (e.g., \d{3}-\d{2}-\d{4})"
+              style={{
+                width: '100%',
+                padding: '10px',
+                marginBottom: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+            <input
+              type="text"
+              value={newPattern.pattern_type}
+              onChange={e =>
+                setNewPattern({ ...newPattern, pattern_type: e.target.value })
+              }
+              placeholder="Type (e.g., SSN, CUSTOM)"
+              style={{
+                width: '100%',
+                padding: '10px',
+                marginBottom: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+            <input
+              type="text"
+              value={newPattern.description}
+              onChange={e =>
+                setNewPattern({ ...newPattern, description: e.target.value })
+              }
+              placeholder="Description (optional)"
+              style={{
+                width: '100%',
+                padding: '10px',
+                marginBottom: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              onClick={createPattern}
+              disabled={
+                loading ||
+                !newPattern.name ||
+                !newPattern.pattern ||
+                !newPattern.pattern_type
+              }
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#2196f3',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                fontWeight: '600',
+              }}
+            >
+              Create Pattern
+            </button>
           </div>
 
-          <div>
-            <h2>Whitelisted Sites ({whitelist.length})</h2>
-
-            {whitelist.length === 0 ? (
-              <p style={{ color: '#666' }}>
-                No whitelisted sites yet. Add trusted domains above.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {patterns.length === 0 ? (
+              <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+                No custom patterns yet
               </p>
             ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                {whitelist.map(site => (
+              patterns.map(pattern => (
+                <div
+                  key={pattern.id}
+                  style={{
+                    padding: '16px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    backgroundColor: 'white',
+                  }}
+                >
                   <div
-                    key={site.id}
                     style={{
-                      padding: '15px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
-                      backgroundColor: '#f9f9f9',
                       display: 'flex',
                       justifyContent: 'space-between',
-                      alignItems: 'center',
+                      alignItems: 'start',
+                      marginBottom: '8px',
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: '600', fontSize: '15px' }}>
-                        {site.domain}
+                      <div style={{ fontWeight: '600', marginBottom: '4px' }}>
+                        {pattern.name}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                        Added {new Date(site.created_at).toLocaleDateString()}
+                      <div
+                        style={{
+                          fontSize: '13px',
+                          color: '#666',
+                          fontFamily: 'monospace',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        {pattern.pattern}
                       </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        Type: {pattern.pattern_type}
+                      </div>
+                      {pattern.description && (
+                        <div style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>
+                          {pattern.description}
+                        </div>
+                      )}
                     </div>
                     <button
-                      onClick={() => removeDomain(site.id)}
+                      onClick={() => deletePattern(pattern.id)}
                       style={{
                         padding: '6px 12px',
                         backgroundColor: '#f44336',
@@ -778,60 +729,34 @@ export default function OptionsApp() {
                         border: 'none',
                         borderRadius: '4px',
                         cursor: 'pointer',
-                        fontSize: '12px',
+                        fontSize: '13px',
                       }}
                     >
-                      Remove
+                      Delete
                     </button>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))
             )}
           </div>
-        </>
-      )}
-
-      {error && (
-        <div
-          style={{
-            padding: '15px',
-            backgroundColor: '#ffebee',
-            color: '#c62828',
-            borderRadius: '4px',
-            marginTop: '20px',
-          }}
-        >
-          {error}
         </div>
       )}
 
-      {success && (
-        <div
-          style={{
-            padding: '15px',
-            backgroundColor: '#e8f5e9',
-            color: '#2e7d32',
-            borderRadius: '4px',
-            marginTop: '20px',
-          }}
-        >
-          {success}
-        </div>
-      )}
+      {activeTab === 'dashboard' && <Dashboard />}
     </div>
   );
 }
 
 function TabButton({
   active,
-  disabled,
   onClick,
   children,
+  disabled = false,
 }: {
   active: boolean;
-  disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -840,12 +765,12 @@ function TabButton({
       style={{
         padding: '12px 24px',
         border: 'none',
-        background: 'none',
+        backgroundColor: 'transparent',
         borderBottom: active ? '3px solid #ff9800' : '3px solid transparent',
-        color: disabled ? '#ccc' : active ? '#ff9800' : '#666',
-        fontWeight: active ? '600' : '400',
         cursor: disabled ? 'not-allowed' : 'pointer',
         fontSize: '15px',
+        fontWeight: active ? '600' : '500',
+        color: disabled ? '#ccc' : active ? '#ff9800' : '#666',
         transition: 'all 0.2s',
       }}
     >
@@ -864,40 +789,46 @@ function ToggleSwitch({
   color?: string;
 }) {
   return (
-    <label style={{ position: 'relative', display: 'inline-block', width: '48px', height: '24px' }}>
+    <label
+      style={{
+        position: 'relative',
+        display: 'inline-block',
+        width: '50px',
+        height: '26px',
+        cursor: 'pointer',
+      }}
+    >
       <input
         type="checkbox"
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        style={{ opacity: 0, width: 0, height: 0 }}
+        onChange={e => onChange(e.target.checked)}
+        style={{ display: 'none' }}
       />
       <span
         style={{
           position: 'absolute',
-          cursor: 'pointer',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
           backgroundColor: checked ? color : '#ccc',
-          transition: '0.4s',
-          borderRadius: '24px',
+          borderRadius: '26px',
+          transition: '0.3s',
         }}
-      >
-        <span
-          style={{
-            position: 'absolute',
-            content: '',
-            height: '18px',
-            width: '18px',
-            left: checked ? '26px' : '3px',
-            bottom: '3px',
-            backgroundColor: 'white',
-            transition: '0.4s',
-            borderRadius: '50%',
-          }}
-        />
-      </span>
+      />
+      <span
+        style={{
+          position: 'absolute',
+          content: '',
+          height: '20px',
+          width: '20px',
+          left: checked ? '27px' : '3px',
+          bottom: '3px',
+          backgroundColor: 'white',
+          borderRadius: '50%',
+          transition: '0.3s',
+        }}
+      />
     </label>
   );
 }
