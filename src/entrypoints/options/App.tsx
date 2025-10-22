@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { initializeApiClient, getApiClient, WhitelistSite } from '@/shared/api-client';
 import { CustomPattern } from '@/shared/pii-detector';
 import Dashboard from './Dashboard';
-import Logo from '../../assets/icons/pasteproof-48.png'
+import PasteProofIcon from '@/assets/icons/pasteproof-48.png';
 
 export default function OptionsApp() {
   const [authToken, setAuthToken] = useState('');
@@ -255,11 +255,13 @@ export default function OptionsApp() {
         fontFamily: 'system-ui',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
-        <img src={Logo} alt='PasteProof Logo'></img>
-        <div>
-          <h1 style={{ margin: 0 }}>Paste Proof</h1>
-          <p style={{ margin: '4px 0 0 0', color: '#666' }}>Your pasteboard bodyguard</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '32px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <img src={PasteProofIcon}  width={48} height={48}/>
+          <div>
+            <h1 style={{ margin: 0 }}>Paste Proof</h1>
+            <p style={{ margin: '4px 0 0 0', color: '#666' }}>Your pasteboard bodyguard</p>
+          </div>
         </div>
 
         {/* User info / Sign in button */}
