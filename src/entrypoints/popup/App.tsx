@@ -110,6 +110,17 @@ export default function PopupApp() {
     }
   };
 
+  const refreshCurrentTab = async () => {
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab.id) {
+        await browser.tabs.reload(tab.id);
+      }
+    } catch (error) {
+      console.error('Failed to refresh tab:', error);
+    }
+  };
+
   const signIn = async () => {
     try {
       const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
@@ -137,6 +148,9 @@ export default function PopupApp() {
       isAuthenticated: false,
       user: null,
     });
+    
+    // Refresh the page after signing out
+    await refreshCurrentTab();
   };
 
   const toggleEnabled = async () => {
@@ -144,12 +158,18 @@ export default function PopupApp() {
     await storage.setItem('local:enabled', newEnabled);
 
     setState({ ...state, enabled: newEnabled });
+    
+    // Refresh the page after toggling
+    await refreshCurrentTab();
   };
 
   const toggleAutoAiScan = async () => {
     const newAutoAiScan = !state.autoAiScan;
     await storage.setItem('local:autoAiScan', newAutoAiScan);
     setState({ ...state, autoAiScan: newAutoAiScan });
+    
+    // Refresh the page after toggling
+    await refreshCurrentTab();
   };
 
   const toggleWhitelist = async () => {
@@ -191,6 +211,9 @@ export default function PopupApp() {
       }
 
       setState({ ...state, isWhitelisted: !state.isWhitelisted });
+      
+      // Refresh the page after toggling whitelist
+      await refreshCurrentTab();
     } catch (error) {
       console.error('Failed to toggle whitelist:', error);
       alert('Failed to update whitelist. Please try again.');

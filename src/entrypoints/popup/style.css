@@ -67,3 +67,8 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.popup {
+  z-index: 9999; /* or any high value like 10000 */
+  position: fixed; /* or absolute */
+}

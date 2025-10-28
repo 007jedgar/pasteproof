@@ -113,7 +113,7 @@ export function SimpleWarningBadge({
   const totalDetections = detections.length + (aiDetections?.length || 0);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", zIndex: 10000 }}>
       <div
         title={tooltipText}
         onClick={handleTogglePopup}
