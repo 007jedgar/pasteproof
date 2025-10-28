@@ -1,7 +1,5 @@
 // src/entrypoints/popup/App.tsx
 import { useState, useEffect } from 'react';
-import { getApiClient, initializeApiClient } from '@/shared/api-client';
-import Logo from '../../assets/icons/pasteproof-48.png'
 import pasteproofIcon from '@/assets/icons/pasteproof-48.png';
 type User = {
   id: string;
@@ -235,7 +233,7 @@ export default function PopupApp() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <img src={PasteproofIcon} width={35} height={35} />
+        <img alt='pasteproof icon' src={pasteproofIcon} width={35} height={35} />
         <div>
           <div style={styles.title}>PasteProof</div>
           <div style={styles.subtitle}>Your copy/paste bodyguard</div>
