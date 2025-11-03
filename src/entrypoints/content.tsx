@@ -262,10 +262,8 @@ export default defineContentScript({
     let newValue: string;
     
     if (isContentEditable) {
-      // Handle contenteditable elements
       newValue = activeInput.textContent || '';
     } else {
-      // Handle regular inputs and textareas
       newValue = (activeInput as HTMLInputElement | HTMLTextAreaElement).value;
     }
 
@@ -282,17 +280,12 @@ export default defineContentScript({
 
     // Set the new value based on element type
     if (isContentEditable) {
-      // For contenteditable elements
       activeInput.textContent = newValue;
-      
-      // Trigger input events for contenteditable
       activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
       activeInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     } else {
       const input = activeInput as HTMLInputElement | HTMLTextAreaElement;
       
-      // Try multiple approaches to ensure the value is set
-      // Approach 1: Use native setter
       const nativeSetter = Object.getOwnPropertyDescriptor(
         input.tagName === 'INPUT' 
           ? window.HTMLInputElement.prototype 
@@ -303,14 +296,11 @@ export default defineContentScript({
       if (nativeSetter) {
         nativeSetter.call(input, newValue);
       } else {
-        // Approach 2: Direct assignment
         input.value = newValue;
       }
 
-      // Approach 3: Try setting via setAttribute as fallback
       input.setAttribute('value', newValue);
 
-      // Dispatch multiple events to ensure frameworks detect the change
       const events = [
         new Event('input', { bubbles: true, cancelable: true }),
         new Event('change', { bubbles: true, cancelable: true }),
@@ -332,7 +322,6 @@ export default defineContentScript({
         }
       });
 
-      // Force a re-render by briefly removing and re-adding focus
       setTimeout(() => {
         input.blur();
         setTimeout(() => {
@@ -355,18 +344,37 @@ export default defineContentScript({
       });
     });
 
-    // Re-scan after a short delay to update the badge
+    // Clear AI scan cache for this text after anonymization
+    const cacheKey = getCacheKey(newValue);
+    aiScanCache.delete(cacheKey);
+    
+    // Clear the optimizer cache as well
+    aiScanOptimizer.clearCache();
+    
+    // Update lastScannedText to force fresh scan
+    lastScannedText = '';
+
+    // Re-scan after anonymization WITHOUT AI detections initially
+    // This prevents showing stale AI results
     setTimeout(async () => {
-      const currentValue = getInputValue(activeInput!);
+      if (!activeInput) return;
+      
+      const currentValue = getInputValue(activeInput);
       const results = detectPii(currentValue);
       
-      // Re-scan with AI if auto-scan is enabled
-      let aiDetections: any[] | null = null;
-      if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
-        aiDetections = await performAiScan(activeInput!, currentValue);
-      }
+      // First show just pattern-based results (AI cache is cleared)
+      handleDetection(results, null);
       
-      handleDetection(results, aiDetections);
+      // Optionally trigger a fresh AI scan after a short delay
+      // This allows users to see immediate feedback before AI re-scans
+      if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
+        setTimeout(async () => {
+          if (!activeInput) return;
+          const freshAiDetections = await performAiScan(activeInput, currentValue);
+          const freshResults = detectPii(getInputValue(activeInput));
+          handleDetection(freshResults, freshAiDetections);
+        }, 500); // Wait 500ms before re-running AI scan
+      }
     }, 100);
   };
 
@@ -381,12 +389,46 @@ export default defineContentScript({
       return hash.toString(36);
     };
 
+    const isAlreadyRedacted = (text: string): boolean => {
+      // Check if the text contains common redaction patterns
+      const redactionPatterns = [
+        /\[REDACTED\]/gi,
+        /\[REMOVED\]/gi,
+        /\[HIDDEN\]/gi,
+        /•{4,}/g,  // Multiple dots (••••)
+        /\*{4,}/g, // Multiple asterisks (****)
+        /X{4,}/gi, // Multiple X's (XXXX)
+      ];
+      
+      return redactionPatterns.some(pattern => pattern.test(text));
+    };
+
+    const hasMinimalContent = (text: string): boolean => {
+      // Remove common redaction patterns
+      const cleanedText = text
+        .replace(/\[REDACTED\]/gi, '')
+        .replace(/\[REMOVED\]/gi, '')
+        .replace(/\[HIDDEN\]/gi, '')
+        .replace(/•+/g, '')
+        .replace(/\*+/g, '')
+        .replace(/X{4,}/gi, '')
+        .trim();
+      
+      // If there's very little content left after removing redactions, skip AI scan
+      return cleanedText.length >= MIN_TEXT_LENGTH;
+    };    
+
     // Perform AI scan on input with optimization
     const performAiScan = async (
       input: HTMLElement,
       text: string
     ): Promise<any[] | null> => {
       if (!shouldScanText(text)) {
+        return null;
+      }
+
+      if (isAlreadyRedacted(text) && !hasMinimalContent(text)) {
+        console.log('Skipping AI scan - text is already redacted');
         return null;
       }
 
@@ -412,10 +454,24 @@ export default defineContentScript({
 
         const detections = result.detections || [];
         
-        // Log AI detections
-        if (detections.length > 0) {
+        // Filter out detections that are pointing to already redacted content
+        const filteredDetections = detections.filter((detection: any) => {
+          const value = detection.value || '';
+          // Skip if the detected value is a redaction marker
+          if (value.includes('[REDACTED]') || 
+              value.includes('[REMOVED]') || 
+              value.includes('[HIDDEN]') ||
+              /•{4,}/.test(value) ||
+              /\*{4,}/.test(value)) {
+            return false;
+          }
+          return true;
+        });
+        
+        // Log AI detections (only the filtered ones)
+        if (filteredDetections.length > 0) {
           const domain = window.location.hostname;
-          detections.forEach((detection: any) => {
+          filteredDetections.forEach((detection: any) => {
             detectionQueue.add({
               type: detection.type,
               domain,
@@ -431,7 +487,7 @@ export default defineContentScript({
         }
         
         aiScanCache.set(cacheKey, {
-          detections,
+          detections: filteredDetections,
           timestamp: Date.now(),
         });
 
@@ -442,7 +498,7 @@ export default defineContentScript({
           }
         }
 
-        return detections;
+        return filteredDetections;
       } catch (error: any) {
         console.error('AI scan error:', error);
         if (
