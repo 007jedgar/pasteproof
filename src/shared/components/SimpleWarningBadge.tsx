@@ -648,8 +648,8 @@ export function SimpleWarningBadge({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: '28px',
-          height: '28px',
+          width: '24px',
+          height: '24px',
           backgroundColor: 'rgba(255, 255, 255, 0.75)',
           border: hasAiDetections ? '2px solid #9c27b0' : '2px solid #ffc107',
           borderRadius: '50%',
@@ -659,8 +659,8 @@ export function SimpleWarningBadge({
         }}
       >
         <svg
-          width="20"
-          height="20"
+          width="17"
+          height="17"
           viewBox="0 0 24 24"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
@@ -675,18 +675,18 @@ export function SimpleWarningBadge({
           <div
             style={{
               position: 'absolute',
-              top: '-8px',
-              right: '-8px',
+              top: '-7px',
+              right: '-7px',
               backgroundColor: '#d32f2f',
               color: 'white',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              minWidth: '18px',
-              minHeight: '18px',
+              minWidth: '15px',
+              minHeight: '15px',
               padding: '2px',
-              fontSize: '10px',
+              fontSize: '9px',
               fontWeight: 'bold',
               textAlign: 'center',
               lineHeight: '1',
