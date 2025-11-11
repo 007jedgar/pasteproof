@@ -50,6 +50,27 @@ export type WhitelistSite = {
   created_at: number;
 };
 
+export type Team = {
+  id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type TeamPolicy = {
+  id: string;
+  team_id: string;
+  name: string;
+  enabled: boolean;
+  policy_data: {
+    domainRules?: string[];
+    domainBlacklist?: string[];
+    [key: string]: any;
+  };
+  created_at: number;
+  updated_at: number;
+};
+
 export class PasteProofApiClient {
   private apiKey: string;
   private baseUrl: string;
@@ -80,7 +101,6 @@ export class PasteProofApiClient {
         .catch(() => ({ error: 'Unknown error' }));
       throw new Error(error.error || `API error: ${response.status}`);
     }
-    console.log('response', response);
     return response.json();
   }
 
@@ -236,36 +256,64 @@ export class PasteProofApiClient {
   }
 
   async logDetection(detection: {
-  type: string;
-  domain: string;
-  action?: 'detected' | 'blocked' | 'anonymized';
-  metadata?: Record<string, any>;
-}): Promise<void> {
-  try {
-    await this.fetch('/api/detections', {
-      method: 'POST',
-      body: JSON.stringify(detection),
-    });
-  } catch (error) {
-    console.warn('Failed to log detection:', error);
+    type: string;
+    domain: string;
+    action?: 'detected' | 'blocked' | 'anonymized';
+    metadata?: Record<string, any>;
+    team_id?: string | null;
+  }): Promise<void> {
+    try {
+      await this.fetch('/api/detections', {
+        method: 'POST',
+        body: JSON.stringify(detection),
+      });
+    } catch (error) {
+      console.warn('Failed to log detection:', error);
+    }
   }
-}
 
-async logDetectionsBatch(detections: Array<{
-  type: string;
-  domain: string;
-  action?: 'detected' | 'blocked' | 'anonymized';
-  metadata?: Record<string, any>;
-}>): Promise<void> {
-  try {
-    await this.fetch('/api/detections/batch', {
-      method: 'POST',
-      body: JSON.stringify({ detections }),
-    });
-  } catch (error) {
-    console.warn('Failed to log detections batch:', error);
+  async logDetectionsBatch(
+    detections: Array<{
+      type: string;
+      domain: string;
+      action?: 'detected' | 'blocked' | 'anonymized';
+      metadata?: Record<string, any>;
+      team_id?: string | null;
+    }>
+  ): Promise<void> {
+    try {
+      await this.fetch('/api/detections/batch', {
+        method: 'POST',
+        body: JSON.stringify({ detections }),
+      });
+    } catch (error) {
+      console.warn('Failed to log detections batch:', error);
+    }
   }
-}
+
+  // Team methods
+  async getTeams(): Promise<Team[]> {
+    try {
+      const data = await this.fetch<{ teams: Team[] }>('/api/teams');
+      return data.teams;
+    } catch (error) {
+      console.warn('Failed to fetch teams:', error);
+      return [];
+    }
+  }
+
+  // Team policy methods
+  async getTeamPolicies(teamId: string): Promise<TeamPolicy[]> {
+    try {
+      const data = await this.fetch<{ policies: TeamPolicy[] }>(
+        `/api/teams/${teamId}/policies`
+      );
+      return data.policies;
+    } catch (error) {
+      console.warn('Failed to fetch team policies:', error);
+      return [];
+    }
+  }
 }
 
 // Singleton instance

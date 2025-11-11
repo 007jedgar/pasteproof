@@ -1,6 +1,12 @@
 // src/entrypoints/popup/App.tsx
 import { useState, useEffect } from 'react';
 import pasteproofIcon from '@/assets/icons/pasteproof-48.png';
+import {
+  getApiClient,
+  initializeApiClient,
+  type Team,
+} from '@/shared/api-client';
+
 type User = {
   id: string;
   email: string;
@@ -27,19 +33,68 @@ export default function PopupApp() {
     hasApiKey: false,
   });
   const [loading, setLoading] = useState(true);
+  const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
 
   useEffect(() => {
     loadState();
+    loadUserTeams();
   }, []);
+
+  const loadUserTeams = async () => {
+    try {
+      const authToken = await storage.getItem<string>('local:authToken');
+      if (!authToken) {
+        return;
+      }
+
+      const apiClient = initializeApiClient(authToken);
+      const userTeams = await apiClient.getTeams();
+      setTeams(userTeams);
+
+      // Load saved team ID from storage
+      const savedTeamId = await storage.getItem<string>('local:currentTeamId');
+      if (savedTeamId) {
+        setCurrentTeamId(savedTeamId);
+      } else {
+        // Also check localStorage as fallback
+        const localTeamId = localStorage.getItem('currentTeamId');
+        if (localTeamId) {
+          setCurrentTeamId(localTeamId);
+          await storage.setItem('local:currentTeamId', localTeamId);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load teams:', error);
+    }
+  };
+
+  const handleTeamChange = async (teamId: string | null) => {
+    if (teamId) {
+      await storage.setItem('local:currentTeamId', teamId);
+      localStorage.setItem('currentTeamId', teamId);
+    } else {
+      await storage.removeItem('local:currentTeamId');
+      localStorage.removeItem('currentTeamId');
+    }
+    setCurrentTeamId(teamId);
+
+    // Reload policies from new team by refreshing the current tab
+    await refreshCurrentTab();
+  };
 
   const loadState = async () => {
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       const url = new URL(tab.url || '');
       const domain = url.hostname;
 
-      const enabled = await storage.getItem<boolean>('local:enabled') ?? true;
-      const autoAiScan = await storage.getItem<boolean>('local:autoAiScan') ?? false;
+      const enabled = (await storage.getItem<boolean>('local:enabled')) ?? true;
+      const autoAiScan =
+        (await storage.getItem<boolean>('local:autoAiScan')) ?? false;
       const authToken = await storage.getItem<string>('local:authToken');
       const user = await storage.getItem<any>('local:user');
 
@@ -47,7 +102,10 @@ export default function PopupApp() {
 
       if (!isAuthenticated) {
         try {
-          const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+          const [tab] = await browser.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
           if (tab.url?.includes('pasteproof.com/auth/extension')) {
             // Inject script to read localStorage from auth page
             const results = await browser.scripting.executeScript({
@@ -56,17 +114,17 @@ export default function PopupApp() {
                 const token = localStorage.getItem('pasteproof_auth_token');
                 const userStr = localStorage.getItem('pasteproof_user');
                 return { token, userStr };
-              }
+              },
             });
-            
+
             if (results[0]?.result?.token) {
               const { token, userStr } = results[0].result;
               const userData = JSON.parse(userStr!);
-              
+
               // Save to extension storage
               await storage.setItem('local:authToken', token);
               await storage.setItem('local:user', userData);
-              
+
               isAuthenticated = true;
               console.log('✅ Retrieved auth from localStorage!');
             }
@@ -79,12 +137,15 @@ export default function PopupApp() {
       let isWhitelisted = false;
       if (isAuthenticated) {
         try {
-          const response = await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist/check/${domain}`, {
-            headers: {
-              'X-API-Key': authToken,
-              'Content-Type': 'application/json'
-            },
-          });
+          const response = await fetch(
+            `${import.meta.env.VITE_API_URL}/api/whitelist/check/${domain}`,
+            {
+              headers: {
+                'X-API-Key': authToken,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
           const data = await response.json();
           isWhitelisted = data.whitelisted;
         } catch (error) {
@@ -101,6 +162,11 @@ export default function PopupApp() {
         isWhitelisted,
         hasApiKey: isAuthenticated,
       });
+
+      // Reload teams if authenticated
+      if (isAuthenticated) {
+        loadUserTeams();
+      }
     } catch (error) {
       console.error('Failed to load popup state:', error);
     } finally {
@@ -110,7 +176,10 @@ export default function PopupApp() {
 
   const refreshCurrentTab = async () => {
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (tab.id) {
         await browser.tabs.reload(tab.id);
       }
@@ -122,13 +191,15 @@ export default function PopupApp() {
   const signIn = async () => {
     try {
       const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
-      
-      await browser.tabs.create({ 
+
+      await browser.tabs.create({
         url: authUrl,
-        active: true 
+        active: true,
       });
 
-      alert('Please sign in on the opened tab. After signing in, reopen this popup to see your authenticated state.');
+      alert(
+        'Please sign in on the opened tab. After signing in, reopen this popup to see your authenticated state.'
+      );
       window.close();
     } catch (error) {
       console.error('Sign in error:', error);
@@ -138,15 +209,22 @@ export default function PopupApp() {
 
   const signOut = async () => {
     if (!confirm('Sign out of Paste Proof?')) return;
-    
+
     await storage.removeItem('local:authToken');
     await storage.removeItem('local:user');
+    await storage.removeItem('local:currentTeamId');
+    localStorage.removeItem('currentTeamId');
+
     setState({
       ...state,
       isAuthenticated: false,
       user: null,
     });
-    
+
+    // Clear team state
+    setCurrentTeamId(null);
+    setTeams([]);
+
     // Refresh the page after signing out
     await refreshCurrentTab();
   };
@@ -156,7 +234,7 @@ export default function PopupApp() {
     await storage.setItem('local:enabled', newEnabled);
 
     setState({ ...state, enabled: newEnabled });
-    
+
     // Refresh the page after toggling
     await refreshCurrentTab();
   };
@@ -165,7 +243,7 @@ export default function PopupApp() {
     const newAutoAiScan = !state.autoAiScan;
     await storage.setItem('local:autoAiScan', newAutoAiScan);
     setState({ ...state, autoAiScan: newAutoAiScan });
-    
+
     // Refresh the page after toggling
     await refreshCurrentTab();
   };
@@ -179,23 +257,30 @@ export default function PopupApp() {
     try {
       const authToken = await storage.getItem<string>('local:authToken');
 
-
       if (state.isWhitelisted) {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist`, {
-          headers: {
-            'X-API-Key': authToken as string,
-          },
-        });
-        const data = await response.json();
-        const entry = data.whitelist.find((w: any) => w.domain === state.currentDomain);
-       
-        if (entry) {
-          await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist/${entry.id}`, {
-            method: 'DELETE',
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/whitelist`,
+          {
             headers: {
               'X-API-Key': authToken as string,
             },
-          });
+          }
+        );
+        const data = await response.json();
+        const entry = data.whitelist.find(
+          (w: any) => w.domain === state.currentDomain
+        );
+
+        if (entry) {
+          await fetch(
+            `${import.meta.env.VITE_API_URL}/api/whitelist/${entry.id}`,
+            {
+              method: 'DELETE',
+              headers: {
+                'X-API-Key': authToken as string,
+              },
+            }
+          );
         }
       } else {
         await fetch(`${import.meta.env.VITE_API_URL}/api/whitelist`, {
@@ -209,7 +294,7 @@ export default function PopupApp() {
       }
 
       setState({ ...state, isWhitelisted: !state.isWhitelisted });
-      
+
       // Refresh the page after toggling whitelist
       await refreshCurrentTab();
     } catch (error) {
@@ -233,7 +318,12 @@ export default function PopupApp() {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <img alt='pasteproof icon' src={pasteproofIcon} width={35} height={35} />
+        <img
+          alt="pasteproof icon"
+          src={pasteproofIcon}
+          width={35}
+          height={35}
+        />
         <div>
           <div style={styles.title}>PasteProof</div>
           <div style={styles.subtitle}>Your copy/paste bodyguard</div>
@@ -246,7 +336,10 @@ export default function PopupApp() {
           <p style={{ color: '#666', marginBottom: '16px' }}>
             Sign in to unlock Premium features
           </p>
-          <button onClick={signIn} style={{ ...styles.button, ...styles.buttonPrimary }}>
+          <button
+            onClick={signIn}
+            style={{ ...styles.button, ...styles.buttonPrimary }}
+          >
             Sign In
           </button>
         </div>
@@ -281,8 +374,30 @@ export default function PopupApp() {
             <div style={styles.domain}>{state.currentDomain}</div>
           </div>
 
+          {/* Team Selector */}
+          {teams.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionLabel}>Team</div>
+              <select
+                value={currentTeamId || ''}
+                onChange={e => handleTeamChange(e.target.value || null)}
+                style={styles.select}
+              >
+                <option value="">Personal Account</option>
+                {teams.map(team => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div style={styles.controls}>
-            <button onClick={toggleEnabled} style={{ ...styles.button, ...styles.buttonPrimary }}>
+            <button
+              onClick={toggleEnabled}
+              style={{ ...styles.button, ...styles.buttonPrimary }}
+            >
               {state.enabled ? '⏸️ Disable' : '▶️ Enable'} Protection
             </button>
 
@@ -290,7 +405,9 @@ export default function PopupApp() {
               onClick={toggleWhitelist}
               style={{
                 ...styles.button,
-                ...(state.isWhitelisted ? styles.buttonDanger : styles.buttonSecondary),
+                ...(state.isWhitelisted
+                  ? styles.buttonDanger
+                  : styles.buttonSecondary),
               }}
             >
               {state.isWhitelisted ? '✗ Remove from' : '✓ Add to'} Whitelist
@@ -299,12 +416,31 @@ export default function PopupApp() {
 
           {/* Auto AI Scan Toggle */}
           <div style={styles.divider} />
-          
+
           <div style={styles.section}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginBottom: '4px',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      color: '#333',
+                    }}
+                  >
                     🤖 Auto AI Scan
                   </span>
                   <span
@@ -324,7 +460,7 @@ export default function PopupApp() {
                   Automatically scan inputs with AI
                 </div>
               </div>
-              
+
               <label style={styles.toggle}>
                 <input
                   type="checkbox"
@@ -501,5 +637,17 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'white',
     transition: '0.4s',
     borderRadius: '50%',
+  },
+  select: {
+    width: '100%',
+    padding: '8px 12px',
+    fontSize: '14px',
+    color: '#333',
+    fontWeight: '500',
+    backgroundColor: 'white',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
   },
 };
