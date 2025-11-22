@@ -126,25 +126,32 @@ export default function PopupApp() {
           });
           if (tab.url?.includes('pasteproof.com/auth/extension')) {
             // Inject script to read localStorage from auth page
-            const results = await browser.scripting.executeScript({
-              target: { tabId: tab.id! },
-              func: () => {
-                const token = localStorage.getItem('pasteproof_auth_token');
-                const userStr = localStorage.getItem('pasteproof_user');
-                return { token, userStr };
-              },
-            });
+            // Handle both Chrome and Firefox scripting API
+            try {
+              const results = await browser.scripting.executeScript({
+                target: { tabId: tab.id! },
+                func: () => {
+                  const token = localStorage.getItem('pasteproof_auth_token');
+                  const userStr = localStorage.getItem('pasteproof_user');
+                  return { token, userStr };
+                },
+              });
 
-            if (results[0]?.result?.token) {
-              const { token, userStr } = results[0].result;
-              const userData = JSON.parse(userStr!);
+              if (results && results[0]?.result?.token) {
+                const { token, userStr } = results[0].result;
+                const userData = JSON.parse(userStr!);
 
-              // Save to extension storage
-              await storage.setItem('local:authToken', token);
-              await storage.setItem('local:user', userData);
+                // Save to extension storage
+                await storage.setItem('local:authToken', token);
+                await storage.setItem('local:user', userData);
 
-              isAuthenticated = true;
-              console.log('✅ Retrieved auth from localStorage!');
+                isAuthenticated = true;
+                console.log('✅ Retrieved auth from localStorage!');
+              }
+            } catch (scriptError) {
+              console.log('Scripting API error (may be Firefox):', scriptError);
+              // Firefox fallback: try using tabs.executeScript for older versions
+              // Modern Firefox should support scripting API with proper permissions
             }
           }
         } catch (err) {
@@ -353,9 +360,7 @@ export default function PopupApp() {
           <div style={styles.authIcon}>
             <LockIcon sx={{ fontSize: 36, color: '#ff9800' }} />
           </div>
-          <p style={styles.authText}>
-            Sign in to unlock Premium features
-          </p>
+          <p style={styles.authText}>Sign in to unlock Premium features</p>
           <button
             onClick={signIn}
             style={{
@@ -367,12 +372,14 @@ export default function PopupApp() {
             onMouseEnter={e => {
               e.currentTarget.style.backgroundColor = '#fb8c00';
               e.currentTarget.style.transform = 'translateY(-1px)';
-              e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+              e.currentTarget.style.boxShadow =
+                '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
             }}
             onMouseLeave={e => {
               e.currentTarget.style.backgroundColor = '#ff9800';
               e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+              e.currentTarget.style.boxShadow =
+                '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
             }}
           >
             Sign In
@@ -429,7 +436,8 @@ export default function PopupApp() {
                 onFocus={e => {
                   e.currentTarget.style.borderColor = '#ff9800';
                   e.currentTarget.style.backgroundColor = '#ffffff';
-                  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(255, 152, 0, 0.1)';
+                  e.currentTarget.style.boxShadow =
+                    '0 0 0 3px rgba(255, 152, 0, 0.1)';
                 }}
                 onBlur={e => {
                   e.currentTarget.style.borderColor = '#e5e7eb';
@@ -454,12 +462,14 @@ export default function PopupApp() {
               onMouseEnter={e => {
                 e.currentTarget.style.backgroundColor = '#fb8c00';
                 e.currentTarget.style.transform = 'translateY(-1px)';
-                e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+                e.currentTarget.style.boxShadow =
+                  '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.backgroundColor = '#ff9800';
                 e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+                e.currentTarget.style.boxShadow =
+                  '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
               }}
             >
               {state.enabled ? (
@@ -504,7 +514,8 @@ export default function PopupApp() {
                   e.currentTarget.style.backgroundColor = '#059669';
                 }
                 e.currentTarget.style.transform = 'translateY(-1px)';
-                e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+                e.currentTarget.style.boxShadow =
+                  '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
               }}
               onMouseLeave={e => {
                 if (state.isWhitelisted) {
@@ -513,7 +524,8 @@ export default function PopupApp() {
                   e.currentTarget.style.backgroundColor = '#10b981';
                 }
                 e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+                e.currentTarget.style.boxShadow =
+                  '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
               }}
             >
               {state.isWhitelisted ? (

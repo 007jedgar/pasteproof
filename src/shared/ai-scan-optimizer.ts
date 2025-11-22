@@ -21,7 +21,7 @@ export class AiScanOptimizer {
     let hash = 0;
     for (let i = 0; i < text.length; i++) {
       const char = text.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return hash.toString(36);
@@ -34,9 +34,9 @@ export class AiScanOptimizer {
     const len1 = text1.length;
     const len2 = text2.length;
     const maxLen = Math.max(len1, len2);
-    
+
     if (maxLen === 0) return 1.0;
-    
+
     // Simple character-based similarity
     const distance = this.levenshteinDistance(text1, text2);
     return 1 - distance / maxLen;
@@ -64,8 +64,8 @@ export class AiScanOptimizer {
         } else {
           matrix[i][j] = Math.min(
             matrix[i - 1][j - 1] + 1, // substitution
-            matrix[i][j - 1] + 1,     // insertion
-            matrix[i - 1][j] + 1      // deletion
+            matrix[i][j - 1] + 1, // insertion
+            matrix[i - 1][j] + 1 // deletion
           );
         }
       }
@@ -79,7 +79,10 @@ export class AiScanOptimizer {
    */
   shouldScan(text: string): boolean {
     // Don't scan if too short or too long
-    if (text.length < this.MIN_TEXT_LENGTH || text.length > this.MAX_TEXT_LENGTH) {
+    if (
+      text.length < this.MIN_TEXT_LENGTH ||
+      text.length > this.MAX_TEXT_LENGTH
+    ) {
       return false;
     }
 
@@ -131,6 +134,7 @@ export class AiScanOptimizer {
    */
   cacheResult(text: string, detections: any[]): void {
     const hash = this.hashText(text);
+
     this.cache.set(hash, {
       hash,
       detections,

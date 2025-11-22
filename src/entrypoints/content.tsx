@@ -16,15 +16,6 @@ import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
 
 let authToken: string | null = null;
 
-// Simple in-memory cache for AI scan results
-const aiScanCache = new Map<
-  string,
-  {
-    detections: any[];
-    timestamp: number;
-  }
->();
-
 const CACHE_DURATION = 30000; // 30 seconds
 const MIN_TEXT_LENGTH = 10;
 const MAX_TEXT_LENGTH = 5000;
@@ -99,7 +90,6 @@ export default defineContentScript({
     const autoAiScan =
       (await storage.getItem<boolean>('local:autoAiScan')) ?? true;
     if (!enabled) {
-      console.log('Paste Proof is disabled');
       return;
     }
 
@@ -160,9 +150,7 @@ export default defineContentScript({
           authToken = token;
           initializeApiClient(token);
         }
-      } catch (err) {
-        console.log('Could not check localStorage:', err);
-      }
+      } catch (err) {}
     }
 
     if (authToken) {
@@ -198,7 +186,6 @@ export default defineContentScript({
     let badgeRoot: Root | null = null;
     let dotRoot: Root | null = null;
     let isPopupOpen = false;
-    let lastScannedText = '';
     let contextMenuInput: HTMLInputElement | HTMLTextAreaElement | null = null;
 
     // Initialize team policies on page load
@@ -230,7 +217,6 @@ export default defineContentScript({
           // Check if current domain is blacklisted
           const currentDomain = window.location.hostname;
           if (domainBlacklist?.includes(currentDomain)) {
-            console.log('Domain is blacklisted by team policy');
             // TODO: Show warning/block
           }
         }
@@ -287,6 +273,104 @@ export default defineContentScript({
         return true;
       }
       return false;
+    };
+
+    // Detect the expected data type based on input attributes
+    const getExpectedInputType = (
+      element: HTMLInputElement | HTMLTextAreaElement | HTMLElement
+    ): Set<string> => {
+      const expectedTypes = new Set<string>();
+
+      // Get all text attributes to check
+      const attrs = {
+        id: element.id?.toLowerCase() || '',
+        name: (element as HTMLInputElement).name?.toLowerCase() || '',
+        placeholder:
+          (element as HTMLInputElement).placeholder?.toLowerCase() || '',
+        type: (element as HTMLInputElement).type?.toLowerCase() || '',
+        autocomplete: element.getAttribute('autocomplete')?.toLowerCase() || '',
+        ariaLabel: element.getAttribute('aria-label')?.toLowerCase() || '',
+        title: element.getAttribute('title')?.toLowerCase() || '',
+      };
+
+      // Check for associated label
+      let labelText = '';
+      if (element.id) {
+        const label = document.querySelector(`label[for="${element.id}"]`);
+        if (label) {
+          labelText = label.textContent?.toLowerCase() || '';
+        }
+      }
+
+      // Combine all text to search
+      const allText = Object.values(attrs).join(' ') + ' ' + labelText;
+
+      // Email patterns
+      if (
+        attrs.type === 'email' ||
+        attrs.autocomplete.includes('email') ||
+        /\b(email|e-mail|mail)\b/.test(allText)
+      ) {
+        expectedTypes.add('EMAIL');
+      }
+
+      // Phone patterns
+      if (
+        attrs.type === 'tel' ||
+        attrs.autocomplete.includes('tel') ||
+        /\b(phone|telephone|mobile|cell|fax)\b/.test(allText)
+      ) {
+        expectedTypes.add('PHONE');
+      }
+
+      // Password patterns
+      if (
+        attrs.type === 'password' ||
+        attrs.autocomplete.includes('password') ||
+        /\b(password|passwd|pwd)\b/.test(allText)
+      ) {
+        expectedTypes.add('PASSWORD');
+      }
+
+      // SSN patterns
+      if (
+        attrs.autocomplete.includes('ssn') ||
+        /\b(ssn|social\s*security|social\s*insurance)\b/.test(allText)
+      ) {
+        expectedTypes.add('SSN');
+      }
+
+      // Credit card patterns
+      if (
+        attrs.autocomplete.includes('cc-') ||
+        attrs.autocomplete === 'cc-number' ||
+        /\b(card|credit.*card|debit.*card|cc.*number|card.*number)\b/.test(
+          allText
+        )
+      ) {
+        expectedTypes.add('CREDIT_CARD');
+      }
+
+      // Date of birth patterns
+      if (
+        attrs.autocomplete.includes('bday') ||
+        /\b(birth.*date|dob|date.*of.*birth)\b/.test(allText)
+      ) {
+        expectedTypes.add('DATE_OF_BIRTH');
+      }
+
+      return expectedTypes;
+    };
+
+    // Check if we should skip AI scanning for this input
+    const shouldSkipAiForInput = (
+      element: HTMLInputElement | HTMLTextAreaElement | HTMLElement
+    ): boolean => {
+      const expectedTypes = getExpectedInputType(element);
+
+      // Skip AI scanning if the input is clearly meant for sensitive data
+      // (user is expected to enter this type of data)
+      return expectedTypes.size > 0;
     };
 
     const anonymizeValue = (detection: DetectionResult): string => {
@@ -419,52 +503,47 @@ export default defineContentScript({
         });
       });
 
-      // Clear AI scan cache for this text after anonymization
-      const cacheKey = getCacheKey(newValue);
-      aiScanCache.delete(cacheKey);
-
-      // Clear the optimizer cache as well
+      // Clear AI scan cache after anonymization
       aiScanOptimizer.clearCache();
-
-      // Update lastScannedText to force fresh scan
-      lastScannedText = '';
 
       // Re-scan after anonymization WITHOUT AI detections initially
       // This prevents showing stale AI results
       setTimeout(async () => {
         if (!activeInput) return;
 
+        const expectedTypes = getExpectedInputType(activeInput);
+        const skipAi = shouldSkipAiForInput(activeInput);
+
         const currentValue = getInputValue(activeInput);
         const results = detectPii(currentValue);
+        const filteredResults = filterExpectedDetections(
+          results,
+          expectedTypes
+        );
 
         // First show just pattern-based results (AI cache is cleared)
-        handleDetection(results, null);
+        handleDetection(filteredResults, null);
 
         // Optionally trigger a fresh AI scan after a short delay
         // This allows users to see immediate feedback before AI re-scans
-        if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
+        if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(currentValue)) {
           setTimeout(async () => {
             if (!activeInput) return;
+
+            const freshExpectedTypes = getExpectedInputType(activeInput);
             const freshAiDetections = await performAiScan(
               activeInput,
               currentValue
             );
             const freshResults = detectPii(getInputValue(activeInput));
-            handleDetection(freshResults, freshAiDetections);
+            const freshFiltered = filterExpectedDetections(
+              freshResults,
+              freshExpectedTypes
+            );
+            handleDetection(freshFiltered, freshAiDetections);
           }, 500); // Wait 500ms before re-running AI scan
         }
       }, 100);
-    };
-
-    // Helper function to create cache key
-    const getCacheKey = (text: string): string => {
-      let hash = 0;
-      for (let i = 0; i < text.length; i++) {
-        const char = text.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash = hash & hash;
-      }
-      return hash.toString(36);
     };
 
     const isAlreadyRedacted = (text: string): boolean => {
@@ -501,6 +580,9 @@ export default defineContentScript({
       input: HTMLElement,
       text: string
     ): Promise<any[] | null> => {
+      const textPreview =
+        text.length > 50 ? text.substring(0, 50) + '...' : text;
+
       if (!shouldScanText(text)) {
         return null;
       }
@@ -509,11 +591,10 @@ export default defineContentScript({
         return null;
       }
 
-      const cacheKey = getCacheKey(text);
-      const cached = aiScanCache.get(cacheKey);
-
-      if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-        return cached.detections;
+      // Check cache first using the optimizer
+      const cachedResult = aiScanOptimizer.getCachedResult(text);
+      if (cachedResult !== null) {
+        return cachedResult;
       }
 
       try {
@@ -522,10 +603,14 @@ export default defineContentScript({
           return null;
         }
 
+        const startTime = performance.now();
+
         const result = await apiClient.analyzeContext(
           text,
           window.location.hostname
         );
+
+        const duration = Math.round(performance.now() - startTime);
 
         const detections = result.detections || [];
 
@@ -544,6 +629,10 @@ export default defineContentScript({
           }
           return true;
         });
+
+        if (filteredDetections.length !== detections.length) {
+        }
+        filteredDetections.forEach((d, idx) => {});
 
         // Log AI detections (only the filtered ones)
         if (filteredDetections.length > 0) {
@@ -565,17 +654,8 @@ export default defineContentScript({
           });
         }
 
-        aiScanCache.set(cacheKey, {
-          detections: filteredDetections,
-          timestamp: Date.now(),
-        });
-
-        // Clean old cache entries
-        for (const [key, entry] of aiScanCache.entries()) {
-          if (Date.now() - entry.timestamp > CACHE_DURATION) {
-            aiScanCache.delete(key);
-          }
-        }
+        // Cache the result using the optimizer
+        aiScanOptimizer.cacheResult(text, filteredDetections);
 
         return filteredDetections;
       } catch (error: any) {
@@ -584,7 +664,6 @@ export default defineContentScript({
           error.message?.includes('Premium subscription required') ||
           error.message?.includes('Rate limit exceeded')
         ) {
-          console.log('AI scan not available:', error.message);
         }
         return null;
       }
@@ -865,37 +944,65 @@ export default defineContentScript({
       return '';
     };
 
+    // Filter detections based on expected input type
+    const filterExpectedDetections = (
+      detections: DetectionResult[],
+      expectedTypes: Set<string>
+    ): DetectionResult[] => {
+      if (expectedTypes.size === 0) return detections;
+
+      // Filter out detections that match the expected input type
+      return detections.filter(d => !expectedTypes.has(d.type));
+    };
+
     // Debounced scan with AI scan and optimization
     const debouncedScan = debounce(async (text: string, input: HTMLElement) => {
+      const expectedTypes = getExpectedInputType(
+        input as HTMLInputElement | HTMLTextAreaElement
+      );
+      const skipAi = shouldSkipAiForInput(
+        input as HTMLInputElement | HTMLTextAreaElement
+      );
+
+      if (expectedTypes.size > 0) {
+      }
+
       const results = detectPii(text);
+      const filteredResults = filterExpectedDetections(results, expectedTypes);
+
       let aiDetections: any[] | null = null;
-      if (autoAiScan && aiScanOptimizer.shouldScan(text)) {
-        if (aiScanOptimizer.hasSignificantChange(lastScannedText, text)) {
-          aiDetections = await performAiScan(input, text);
-          lastScannedText = text;
-        } else {
-          aiDetections = aiScanOptimizer.getCachedResult(text);
+      if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(text)) {
+        // performAiScan will handle caching internally
+        aiDetections = await performAiScan(input, text);
+      } else {
+        if (!autoAiScan) {
+        } else if (skipAi) {
+        } else if (!aiScanOptimizer.shouldScan(text)) {
         }
       }
 
-      handleDetection(results, aiDetections);
+      handleDetection(filteredResults, aiDetections);
     }, 800);
 
     // Manual rescan function for context menu
     const manualRescan = async () => {
       if (!contextMenuInput) return;
 
+      const expectedTypes = getExpectedInputType(contextMenuInput);
+      const skipAi = shouldSkipAiForInput(contextMenuInput);
       const currentValue = getInputValue(contextMenuInput);
       const results = detectPii(currentValue);
+      const filteredResults = filterExpectedDetections(results, expectedTypes);
 
-      // Force AI scan regardless of cache
+      // Force AI scan (clear cache first to ensure fresh scan)
       let aiDetections: any[] | null = null;
-      if (autoAiScan && shouldScanText(currentValue)) {
+      if (autoAiScan && !skipAi && shouldScanText(currentValue)) {
+        // Clear cache for this specific text to force a fresh scan
+        aiScanOptimizer.clearCache();
         aiDetections = await performAiScan(contextMenuInput, currentValue);
-        lastScannedText = currentValue;
       }
 
-      handleDetection(results, aiDetections);
+      handleDetection(filteredResults, aiDetections);
 
       // Focus the input after rescan
       contextMenuInput.focus();
@@ -915,14 +1022,31 @@ export default defineContentScript({
         // Wait for pasted content to be inserted, then trigger immediate scan
         setTimeout(async () => {
           if (activeInput !== input) return;
+
+          const expectedTypes = getExpectedInputType(
+            input as HTMLInputElement | HTMLTextAreaElement
+          );
+          const skipAi = shouldSkipAiForInput(
+            input as HTMLInputElement | HTMLTextAreaElement
+          );
+
           const currentValue = getInputValue(input);
+
           const results = detectPii(currentValue);
+          const filteredResults = filterExpectedDetections(
+            results,
+            expectedTypes
+          );
+
           let aiDetections: any[] | null = null;
-          if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
+          if (
+            autoAiScan &&
+            !skipAi &&
+            aiScanOptimizer.shouldScan(currentValue)
+          ) {
             aiDetections = await performAiScan(input, currentValue);
-            lastScannedText = currentValue;
           }
-          handleDetection(results, aiDetections);
+          handleDetection(filteredResults, aiDetections);
         }, 0);
       });
 
@@ -956,18 +1080,31 @@ export default defineContentScript({
 
         if (!isValidInput(target)) return;
 
+        const inputName =
+          (target as HTMLInputElement).name ||
+          (target as HTMLInputElement).id ||
+          'unnamed';
+
         removeAllIndicators();
 
         activeInput = target as HTMLInputElement | HTMLTextAreaElement;
+        const expectedTypes = getExpectedInputType(activeInput);
+        const skipAi = shouldSkipAiForInput(activeInput);
+
         const currentValue = getInputValue(activeInput);
         const results = detectPii(currentValue);
+        const filteredResults = filterExpectedDetections(
+          results,
+          expectedTypes
+        );
+
         let aiDetections: any[] | null = null;
-        if (autoAiScan && aiScanOptimizer.shouldScan(currentValue)) {
+        if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(currentValue)) {
           aiDetections = await performAiScan(activeInput, currentValue);
-          lastScannedText = currentValue;
+        } else if (skipAi) {
         }
 
-        handleDetection(results, aiDetections);
+        handleDetection(filteredResults, aiDetections);
 
         attachInputListener(activeInput);
       },
@@ -1012,12 +1149,18 @@ export default defineContentScript({
         !dotContainer.contains(event.target as Node)
       ) {
         isPopupOpen = false;
-        if (badgeRoot) {
-          const currentValue = getInputValue(activeInput!);
+        if (badgeRoot && activeInput) {
+          const expectedTypes = getExpectedInputType(activeInput);
+          const currentValue = getInputValue(activeInput);
           const results = detectPii(currentValue);
+          const filteredResults = filterExpectedDetections(
+            results,
+            expectedTypes
+          );
+
           badgeRoot.render(
             <SimpleWarningBadge
-              detections={results}
+              detections={filteredResults}
               onAnonymize={handleAnonymize}
               onPopupStateChange={isOpen => {
                 isPopupOpen = isOpen;
@@ -1042,7 +1185,6 @@ export default defineContentScript({
         const token = await storage.getItem<string>('local:authToken');
 
         if (!token) {
-          console.log('No auth token, skipping custom patterns');
           return;
         }
 
@@ -1054,7 +1196,6 @@ export default defineContentScript({
           if (patterns && patterns.length > 0) {
             setCustomPatterns(patterns);
           } else {
-            console.log('No custom patterns found');
           }
         } catch (apiError) {
           console.error('Failed to fetch patterns from API:', apiError);
@@ -1081,10 +1222,6 @@ export default defineContentScript({
           initializeWithTeamPolicies();
         }
         if (changes.autoAiScan) {
-          console.log(
-            'Auto AI scan setting changed:',
-            changes.autoAiScan.newValue
-          );
         }
       }
     });

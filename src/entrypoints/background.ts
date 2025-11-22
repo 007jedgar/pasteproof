@@ -1,5 +1,3 @@
-/*global chrome*/
-
 import { getApiClient } from '@/shared/api-client';
 
 // entrypoints/background.ts
@@ -81,7 +79,13 @@ setInterval(() => {
 }, 30000); // Every 30 seconds
 
 // Flush on browser events
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
+// Note: onSuspend is Chrome-specific and not available in Firefox
+// Firefox uses different lifecycle events
+if (
+  typeof chrome !== 'undefined' &&
+  chrome.runtime &&
+  chrome.runtime.onSuspend
+) {
   chrome.runtime.onSuspend.addListener(() => {
     detectionQueue.flush();
   });
