@@ -62,13 +62,26 @@ export type TeamPolicy = {
   team_id: string;
   name: string;
   enabled: boolean;
-  policy_data: {
-    domainRules?: string[];
-    domainBlacklist?: string[];
-    [key: string]: any;
-  };
-  created_at: number;
-  updated_at: number;
+  policy_data:
+    | string
+    | {
+        patterns?: Array<{
+          id: string;
+          name: string;
+          pattern: string;
+          description?: string;
+          pattern_type: string;
+        }>;
+        domainRules?: any;
+        domainBlacklist?: string[];
+        domainWhitelist?: string[];
+        alertThreshold?: any;
+        complianceTemplate?: string;
+        customPatternLimit?: number;
+        [key: string]: any;
+      };
+  created_at: number | string;
+  updated_at: number | string;
 };
 
 export class PasteProofApiClient {
@@ -183,7 +196,7 @@ export class PasteProofApiClient {
     return data.stats;
   }
 
-  // Fetch all custom patterns
+  // Fetch all custom patterns (user's personal patterns)
   async getPatterns(): Promise<CustomPattern[]> {
     const data = await this.fetch<{ patterns: CustomPattern[] }>(
       '/v1/patterns'
@@ -308,7 +321,14 @@ export class PasteProofApiClient {
       const data = await this.fetch<{ policies: TeamPolicy[] }>(
         `/v1/teams/${teamId}/policies`
       );
-      return data.policies;
+      // Parse policy_data if it's a string
+      return data.policies.map(policy => ({
+        ...policy,
+        policy_data:
+          typeof policy.policy_data === 'string'
+            ? JSON.parse(policy.policy_data)
+            : policy.policy_data,
+      }));
     } catch (error) {
       console.warn('Failed to fetch team policies:', error);
       return [];

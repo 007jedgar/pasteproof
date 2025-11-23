@@ -88,17 +88,16 @@ function luhnCheck(cardNumber: string): boolean {
 // Set custom patterns (called after fetching from API)
 export function setCustomPatterns(patterns: CustomPattern[]) {
   customPatterns = patterns.filter(p => {
-    const isActive = p.is_active === 1 || p.is_active === true || p.is_active === '1';
-    console.log(`Pattern "${p.name}" active check:`, isActive, 'Value:', p.is_active, 'Type:', typeof p.is_active);
+    const isActive =
+      p.is_active === 1 || p.is_active === true || p.is_active === '1';
     return isActive;
   });
-    
+
   // Test each pattern
   customPatterns.forEach(p => {
     try {
       const regex = new RegExp(p.pattern, 'gi');
       const testResult = regex.test('EMP-123456');
-      console.log(`Pattern "${p.name}" regex test:`, testResult);
     } catch (e) {
       console.error(`❌ Pattern "${p.name}" regex error:`, e);
     }
@@ -132,27 +131,27 @@ export function detectPii(text: string): DetectionResult[] {
   }
 
   // Check custom patterns
-for (const customPattern of customPatterns) {
-  try {
-    const regex = new RegExp(customPattern.pattern, 'gi');
-    const matches = text.matchAll(regex);
+  for (const customPattern of customPatterns) {
+    try {
+      const regex = new RegExp(customPattern.pattern, 'gi');
+      const matches = text.matchAll(regex);
 
-    for (const match of matches) {
-      const value = match[0];
+      for (const match of matches) {
+        const value = match[0];
 
-      results.push({
-        type: customPattern.pattern_type,
-        value,
-        start: match.index,
-        end: match.index ? match.index + value.length : undefined,
-        confidence: 0.9,                    
-        patternName: customPattern.name,
-      });
+        results.push({
+          type: customPattern.pattern_type,
+          value,
+          start: match.index,
+          end: match.index ? match.index + value.length : undefined,
+          confidence: 0.9,
+          patternName: customPattern.name,
+        });
+      }
+    } catch (error) {
+      console.error(`Invalid custom pattern: ${customPattern.name}`, error);
     }
-  } catch (error) {
-    console.error(`Invalid custom pattern: ${customPattern.name}`, error);
   }
-}
   // Remove duplicates (same value and type)
   const uniqueResults = results.filter(
     (result, index, self) =>

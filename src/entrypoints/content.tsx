@@ -212,7 +212,12 @@ export default defineContentScript({
           activeTeamPolicy = activePolicy;
 
           // Apply team policy rules
-          const { domainRules, domainBlacklist } = activePolicy.policy_data;
+          const policyData =
+            typeof activePolicy.policy_data === 'string'
+              ? JSON.parse(activePolicy.policy_data)
+              : activePolicy.policy_data;
+
+          const { domainRules, domainBlacklist } = policyData;
 
           // Check if current domain is blacklisted
           const currentDomain = window.location.hostname;
@@ -1191,11 +1196,54 @@ export default defineContentScript({
         const apiClient = initializeApiClient(token);
 
         try {
-          const patterns = await apiClient.getPatterns();
+          // Fetch user's personal patterns
+          const personalPatterns = await apiClient.getPatterns();
 
-          if (patterns && patterns.length > 0) {
-            setCustomPatterns(patterns);
-          } else {
+          // Fetch patterns from all teams the user is part of
+          const teams = await apiClient.getTeams();
+          const teamPoliciesPromises = teams.map(team =>
+            apiClient.getTeamPolicies(team.id)
+          );
+          const teamPoliciesArrays = await Promise.all(teamPoliciesPromises);
+
+          // Extract patterns from all team policies
+          const allTeamPatterns: any[] = [];
+          teamPoliciesArrays.flat().forEach(policy => {
+            if (policy.enabled && policy.policy_data) {
+              const policyData =
+                typeof policy.policy_data === 'string'
+                  ? JSON.parse(policy.policy_data)
+                  : policy.policy_data;
+
+              if (policyData.patterns && Array.isArray(policyData.patterns)) {
+                policyData.patterns.forEach((pattern: any) => {
+                  // Convert team policy pattern format to CustomPattern format
+                  allTeamPatterns.push({
+                    id: pattern.id,
+                    name: pattern.name,
+                    pattern: pattern.pattern,
+                    pattern_type: pattern.pattern_type,
+                    description: pattern.description || '',
+                    is_active: true,
+                    user_id: '', // Team patterns don't have a specific user
+                    created_at: policy.created_at,
+                    updated_at: policy.updated_at,
+                  });
+                });
+              }
+            }
+          });
+
+          // Merge personal and team patterns
+          const allPatterns = [...personalPatterns, ...allTeamPatterns];
+
+          // Remove duplicates based on pattern ID (prefer personal patterns)
+          const uniquePatterns = Array.from(
+            new Map(allPatterns.map(p => [p.id, p])).values()
+          );
+
+          if (uniquePatterns && uniquePatterns.length > 0) {
+            setCustomPatterns(uniquePatterns);
           }
         } catch (apiError) {
           console.error('Failed to fetch patterns from API:', apiError);
