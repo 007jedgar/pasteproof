@@ -50,6 +50,6 @@ Copyright (C) 2025 Not a Budgeting Inc.
 
 Use of this software is governed by the Business Source License included in the LICENSE file and at www.mariadb.com/bsl11.
 
-Change Date: January 1, 2029
+Change Date: January 1, 2030
 
 On the date above, in accordance with the Business Source License, use of this software will be governed by the Apache License 2.0.
