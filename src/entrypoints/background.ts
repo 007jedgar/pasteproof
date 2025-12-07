@@ -104,6 +104,41 @@ function createContextMenu() {
   }
 }
 
+// SECURITY: Validate origin for external messages to prevent subdomain attacks
+// This matches the validation logic in content.tsx isValidOrigin()
+function isValidExternalOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+
+  try {
+    const url = new URL(origin);
+    const hostname = url.hostname.toLowerCase();
+
+    // Check for pasteproof.com and all its subdomains (api.pasteproof.com, www.pasteproof.com, etc.)
+    if (hostname === 'pasteproof.com' || hostname.endsWith('.pasteproof.com')) {
+      return true;
+    }
+
+    // Exact matches for other trusted domains
+    const trustedDomains = ['localhost', '127.0.0.1'];
+    if (trustedDomains.includes(hostname)) {
+      return true;
+    }
+
+    // Check for vercel.app subdomains - only allow pasteproof-related ones
+    if (hostname.endsWith('.vercel.app')) {
+      const subdomain = hostname.replace('.vercel.app', '');
+      // Only allow subdomains starting with "pasteproof"
+      if (subdomain.startsWith('pasteproof')) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(() => {
     // Create context menu on install
@@ -128,4 +163,33 @@ export default defineBackground(() => {
         });
     }
   });
+
+  // SECURITY: Handle external messages with origin validation
+  // This prevents unauthorized websites from messaging the extension
+  // even if they match the externally_connectable pattern
+  if (
+    typeof chrome !== 'undefined' &&
+    chrome.runtime &&
+    chrome.runtime.onMessageExternal
+  ) {
+    chrome.runtime.onMessageExternal.addListener(
+      (message, sender, sendResponse) => {
+        // Validate origin before processing any external message
+        if (!isValidExternalOrigin(sender.url)) {
+          console.warn(
+            '[PasteProof] Rejected external message from untrusted origin:',
+            sender.url
+          );
+          sendResponse({ error: 'Unauthorized origin' });
+          return false; // Indicates we will not send a response asynchronously
+        }
+
+        // Process valid external messages here if needed
+        // Currently, external messaging is not actively used, but this handler
+        // provides defense-in-depth security
+
+        return false; // Indicates we will not send a response asynchronously
+      }
+    );
+  }
 });

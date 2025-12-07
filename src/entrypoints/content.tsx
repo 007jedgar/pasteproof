@@ -102,15 +102,16 @@ export default defineContentScript({
         const url = new URL(origin);
         const hostname = url.hostname.toLowerCase();
 
-        // Exact matches for trusted domains
-        const trustedDomains = [
-          'pasteproof.com',
-          'www.pasteproof.com',
-          'localhost',
-          '127.0.0.1',
-        ];
+        // Check for pasteproof.com and all its subdomains (api.pasteproof.com, www.pasteproof.com, etc.)
+        if (
+          hostname === 'pasteproof.com' ||
+          hostname.endsWith('.pasteproof.com')
+        ) {
+          return true;
+        }
 
-        // Check for exact match
+        // Exact matches for other trusted domains
+        const trustedDomains = ['localhost', '127.0.0.1'];
         if (trustedDomains.includes(hostname)) {
           return true;
         }

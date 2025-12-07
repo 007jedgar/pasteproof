@@ -7,7 +7,7 @@ export default defineConfig({
     name: 'PasteProof',
     description:
       'Your pasteboard bodyguard. Prevents you from pasting sensitive data into the wrong fields.',
-    version: '0.1.8',
+    version: '0.1.9',
     permissions: [
       'storage', // For storing user settings
       'activeTab', // Required for some interactions
@@ -20,8 +20,9 @@ export default defineConfig({
           externally_connectable: {
             matches: [
               'https://pasteproof.com/*',
-              'https://*.pasteproof.com/*',
+              'https://*.pasteproof.com/*', // Allows api.pasteproof.com, www.pasteproof.com, etc.
               'http://localhost:*/*',
+              'http://127.0.0.1:*/*',
               'https://*.vercel.app/*',
             ],
           },
@@ -32,7 +33,7 @@ export default defineConfig({
     ],
     // Firefox uses browser_action in MV2, action in MV3
     action: {
-      default_title: 'Paste Proof',
+      default_title: 'PasteProof',
       default_popup: 'entrypoints/popup/index.html',
     },
     icons: {
