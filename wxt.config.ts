@@ -32,15 +32,26 @@ export default defineConfig({
       '<all_urls>', // Allows content scripts to run on all websites
     ],
     // Firefox-specific: Declare data collection practices
-    // Required by Firefox Add-on Store to document what data is collected
+    // Required by Firefox Add-on Store - must be under browser_specific_settings.gecko
+    // See: https://blog.mozilla.org/addons/2025/05/09/new-extension-data-consent-experience-now-available-in-firefox-nightly/
     ...(browser === 'firefox'
       ? {
-          data_collection_permissions: [
-            'Text content from input fields (optional, for AI analysis when premium features enabled)',
-            'Domain/hostname information where detections occur (for analytics and context)',
-            'Detection metadata (PII type, action taken) for analytics and team reporting',
-            'User authentication data stored locally for API access and preferences',
-          ],
+          browser_specific_settings: {
+            gecko: {
+              data_collection_permissions: {
+                // Required data: none - extension works without any data collection (local pattern matching)
+                required: [],
+                // Optional data: all features that require server communication are optional
+                optional: [
+                  'websiteContent', // Text content from input fields for AI analysis (premium feature)
+                  'browsingActivity', // Domain/hostname where detections occur (for analytics)
+                  'websiteActivity', // Detection metadata (PII type, actions taken) for analytics
+                  'authenticationInfo', // Auth tokens for premium features and API access
+                  'technicalAndInteraction', // Extension usage, settings, error reports
+                ],
+              },
+            },
+          },
         }
       : {}),
     // Firefox uses browser_action in MV2, action in MV3
