@@ -2,15 +2,17 @@ Business Source License 1.1
 
 License text copyright © 2017 MariaDB Corporation Ab, All Rights Reserved. "Business Source License" is a trademark of MariaDB Corporation Ab.
 
+## Parameters
 
+| Parameter            | Value                                                                                                                                                                                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Licensor             | Not a Budgeting Inc.                                                                                                                                                                                                                                                                                               |
+| Licensed Work        | PasteProof Extension                                                                                                                                                                                                                                                                                               |
+| Additional Use Grant | You may use the Licensed Work for any purpose except: (a) deploying for use by employees of a commercial organization, (b) offering to third parties as part of a commercial product or service, or (c) internal corporate use beyond individual personal use. Individual, non-commercial use is always permitted. |
+| Change Date          | January 1, 2030                                                                                                                                                                                                                                                                                                    |
+| Change License       | Apache License 2.0                                                                                                                                                                                                                                                                                                 |
 
-Parameters
-
-ParameterValueLicensorNot a Budgeting Inc.Licensed WorkPasteProof ExtensionAdditional Use GrantYou may use the Licensed Work for any purpose except: (a) deploying for use by employees of a commercial organization, (b) offering to third parties as part of a commercial product or service, or (c) internal corporate use beyond individual personal use. Individual, non-commercial use is always permitted.Change DateJanuary 1, 2029Change LicenseApache License 2.0
-
-
-
-Terms
+## Terms
 
 The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute, and make non-production use of the Licensed Work. The Licensor may make an Additional Use Grant, above, permitting limited production use.
 
@@ -30,41 +32,24 @@ TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED ON AN "
 
 MariaDB hereby grants you permission to use this License's text to license your works, and to refer to it using the trademark "Business Source License", as long as you comply with the Covenants of Licensor below.
 
-Covenants of Licensor
+## Covenants of Licensor
 
 In consideration of the right to use this License's text and the "Business Source License" name and trademark, Licensor covenants to MariaDB, and to all other recipients of the licensed work to be provided by Licensor:
 
+1. To specify as the Change License the GPL Version 2.0 or any later version, or a license that is compatible with GPL Version 2.0 or a later version, where "compatible" means that software provided under the Change License can be included in a program with software provided under GPL Version 2.0 or a later version. Licensor may specify additional Change Licenses without limitation.
 
+2. To either: (a) specify an additional grant of rights to use that does not impose any additional restriction on the right granted in this License, as the Additional Use Grant; or (b) insert the text "None".
 
-To specify as the Change License the GPL Version 2.0 or any later version, or a license that is compatible with GPL Version 2.0 or a later version, where "compatible" means that software provided under the Change License can be included in a program with software provided under GPL Version 2.0 or a later version. Licensor may specify additional Change Licenses without limitation.
+3. To specify a Change Date.
 
-To either: (a) specify an additional grant of rights to use that does not impose any additional restriction on the right granted in this License, as the Additional Use Grant; or (b) insert the text "None".
+4. Not to modify this License in any other way.
 
-To specify a Change Date.
-
-Not to modify this License in any other way.
-
-
-
-
-
-Standard License Header
+## Standard License Header
 
 Copyright (C) 2025 Not a Budgeting Inc.
 
-
-
-Use of this software is governed by the Business Source License
-
-included in the LICENSE file and at www.mariadb.com/bsl11.
-
-
+Use of this software is governed by the Business Source License included in the LICENSE file and at www.mariadb.com/bsl11.
 
 Change Date: January 1, 2029
 
-
-
-On the date above, in accordance with the Business Source License,
-
-use of this software will be governed by the Apache License 2.0.
-
+On the date above, in accordance with the Business Source License, use of this software will be governed by the Apache License 2.0.
