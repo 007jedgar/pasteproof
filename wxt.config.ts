@@ -31,6 +31,18 @@ export default defineConfig({
     host_permissions: [
       '<all_urls>', // Allows content scripts to run on all websites
     ],
+    // Firefox-specific: Declare data collection practices
+    // Required by Firefox Add-on Store to document what data is collected
+    ...(browser === 'firefox'
+      ? {
+          data_collection_permissions: [
+            'Text content from input fields (optional, for AI analysis when premium features enabled)',
+            'Domain/hostname information where detections occur (for analytics and context)',
+            'Detection metadata (PII type, action taken) for analytics and team reporting',
+            'User authentication data stored locally for API access and preferences',
+          ],
+        }
+      : {}),
     // Firefox uses browser_action in MV2, action in MV3
     action: {
       default_title: 'PasteProof',
