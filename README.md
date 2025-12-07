@@ -136,4 +136,12 @@ For detailed Firefox-specific setup, testing, and submission instructions, see o
 
 ## 📄 License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+Copyright (C) 2025 Not a Budgeting Inc.
+
+This project is licensed under the **Business Source License 1.1**. Individual, non-commercial use is always permitted. Commercial use requires a license.
+
+**Change Date:** January 1, 2029
+
+On the date above, in accordance with the Business Source License, use of this software will be governed by the Apache License 2.0.
+
+See the [LICENSE.md](./LICENSE.md) file for full license terms and details.

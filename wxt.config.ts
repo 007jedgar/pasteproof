@@ -39,16 +39,12 @@ export default defineConfig({
           browser_specific_settings: {
             gecko: {
               data_collection_permissions: {
-                // Required data: none - extension works without any data collection (local pattern matching)
-                required: [],
-                // Optional data: all features that require server communication are optional
-                optional: [
-                  'websiteContent', // Text content from input fields for AI analysis (premium feature)
-                  'browsingActivity', // Domain/hostname where detections occur (for analytics)
-                  'websiteActivity', // Detection metadata (PII type, actions taken) for analytics
-                  'authenticationInfo', // Auth tokens for premium features and API access
-                  'technicalAndInteraction', // Extension usage, settings, error reports
-                ],
+                // Required: "none" indicates extension works without any required data collection
+                // Core pattern matching works completely locally. All server features (AI analysis,
+                // analytics, premium features) are optional and will be requested at runtime via
+                // browser.permissions API when users opt into premium features.
+                // Note: Per Mozilla policy, "none" cannot be combined with optional data types in manifest
+                required: ['none'],
               },
             },
           },
