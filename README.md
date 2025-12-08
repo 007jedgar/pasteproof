@@ -1,5 +1,8 @@
 # Paste Proof - Browser Extension
 
+<img width="1200" height="630" alt="og-image" src="https://github.com/user-attachments/assets/58209fcf-0946-4b32-bab7-cfaba1332fcf" />
+
+
 This repository contains the frontend code for the **Paste Proof** browser extension. It's a privacy-first, Manifest V3 compliant extension built with the [WXT](https://wxt.dev/) framework to provide real-time detection of sensitive data (PII) directly in your browser.
 
 ## ✨ Features
