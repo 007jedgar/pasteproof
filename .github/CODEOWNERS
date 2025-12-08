@@ -1,8 +1,8 @@
 # Default owners for everything
-* @007jedgar @aaronbryant
+* @007jedgar @Aaronlb912
 
 # Sensitive paths require explicit review
-/src/shared/api-client.ts @yourusername
-/src/shared/pii-detector.ts @yourusername
+/src/shared/api-client.ts @007jedgar
+/src/shared/pii-detector.ts @007jedgar
 /.github/ @007jedgar
 /LICENSE @007jedgar
