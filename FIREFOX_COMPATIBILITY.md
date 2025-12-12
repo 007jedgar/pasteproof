@@ -147,23 +147,6 @@ The extension includes comprehensive logging:
 - Content script logs: Check the page's console
 - Popup logs: Check the popup's console (right-click popup → Inspect)
 
-## Submission to Firefox Add-ons (AMO)
-
-1. Build the extension: `npm run build:firefox`
-2. Create the zip: `npm run zip:firefox`
-3. Go to [Firefox Add-ons Developer Hub](https://addons.mozilla.org/developers/)
-4. Upload the generated `.zip` file
-5. Complete the submission form
-6. Wait for review (typically 1-7 days)
-
-### AMO Review Checklist
-
-- [ ] Source code available (if using bundler)
-- [ ] Privacy policy updated
-- [ ] Permission justifications documented
-- [ ] All external API calls disclosed
-- [ ] Test instructions provided
-
 ## Support
 
 For Firefox-specific issues:
