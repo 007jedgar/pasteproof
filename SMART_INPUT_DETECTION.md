@@ -260,7 +260,6 @@ The input field might not have proper semantic attributes. This is a website des
 ## Related Documentation
 
 - [Firefox Compatibility Guide](./FIREFOX_COMPATIBILITY.md)
-- [Firefox Migration Summary](./FIREFOX_MIGRATION_SUMMARY.md)
 - [Main README](./README.md)
 
 ---
