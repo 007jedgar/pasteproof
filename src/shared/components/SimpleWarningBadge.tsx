@@ -11,7 +11,7 @@ export function SimpleWarningBadge({
   initialAiDetections,
   variant = 'full',
   alwaysShowDot = false,
-  autoAiEnabled = true,
+  autoAiEnabled = false,
 }: {
   detections: DetectionResult[];
   onAnonymize: (detections: DetectionResult[]) => void;

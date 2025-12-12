@@ -85,7 +85,7 @@ export default defineContentScript({
     let authToken = await storage.getItem<string>('local:authToken');
     const enabled = (await storage.getItem<boolean>('local:enabled')) ?? true;
     const autoAiScan =
-      (await storage.getItem<boolean>('local:autoAiScan')) ?? true;
+      (await storage.getItem<boolean>('local:autoAiScan')) ?? false;
     if (!enabled) {
       return;
     }
