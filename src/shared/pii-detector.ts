@@ -45,8 +45,11 @@ const BUILT_IN_PATTERNS: Array<{
 }> = [
   {
     type: 'CREDIT_CARD',
+    // Match card numbers with optional spaces/dashes: allows formats like:
+    // 4242424242424242, 4242 4242 4242 4242, 4242-4242-4242-4242
+    // Matches 13-19 digits with card type prefixes (Visa 4xxx, Mastercard 5[1-5]xxx, Amex 3[47]xxx, etc.)
     regex:
-      /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b/g,
+      /\b(?:(?:4\d{3}[-\s]?){3}\d{1,4}|(?:5[1-5]\d{2}[-\s]?)(?:\d{4}[-\s]?){3}\d{4}|(?:3[47]\d{2}[-\s]?)(?:\d{4}[-\s]?){2}\d{4}|(?:3[0-9]\d{2}[-\s]?)(?:\d{4}[-\s]?){2}\d{3}|(?:6(?:011|5[0-9]{2})[-\s]?)(?:\d{4}[-\s]?){3}\d{4})\b/g,
     validate: luhnCheck,
   },
   {
