@@ -1374,15 +1374,6 @@ export default defineContentScript({
     ): DetectionResult[] => {
       if (expectedTypes.size === 0) return detections;
 
-      // Don't filter detections on the playground/demo page - users want to see
-      // detections even in fields meant for that type of data
-      const isPlayground = window.location.hostname === 'pasteproof.com' &&
-        (window.location.pathname === '/playground' || window.location.pathname.startsWith('/playground/'));
-
-      if (isPlayground) {
-        return detections;
-      }
-
       // Filter out detections that match the expected input type
       return detections.filter(d => !expectedTypes.has(d.type));
     };
