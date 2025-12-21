@@ -124,6 +124,20 @@ export function SimpleWarningBadge({
     onPopupStateChange(false);
   };
 
+  const handleAnonymizeAllAi = () => {
+    if (!aiDetections || aiDetections.length === 0) return;
+
+    // Convert AI detections to DetectionResult format
+    const detectionsToAnonymize: DetectionResult[] = aiDetections.map(d => ({
+      type: d.type,
+      value: d.value,
+    }));
+
+    onAnonymize(detectionsToAnonymize);
+    setShowPopup(false);
+    onPopupStateChange(false);
+  };
+
   const totalDetections = Math.max(
     detections.length,
     aiDetections?.length || 0
@@ -573,6 +587,41 @@ export function SimpleWarningBadge({
                         </button>
                       </div>
                     ))}
+
+                    {aiDetections.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleAnonymizeAllAi();
+                        }}
+                        style={{
+                          backgroundColor: '#d32f2f',
+                          color: 'white',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          width: '100%',
+                          marginTop: '8px',
+                        }}
+                        onMouseEnter={e => {
+                          (
+                            e.target as HTMLButtonElement
+                          ).style.backgroundColor = '#c62828';
+                        }}
+                        onMouseLeave={e => {
+                          (
+                            e.target as HTMLButtonElement
+                          ).style.backgroundColor = '#d32f2f';
+                        }}
+                      >
+                        Redact All ({aiDetections.length})
+                      </button>
+                    )}
                   </>
                 )}
 

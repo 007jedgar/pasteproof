@@ -587,6 +587,8 @@ export default defineContentScript({
           return `${maskedUser}@${domain}`;
 
         case 'SSN':
+          // Redact entire SSN for security - even partial SSNs can be sensitive
+          return detection.value.replace(/\d/g, '•');
         case 'PHONE':
           return detection.value.replace(/(\d)/g, (match, _, offset) => {
             const digitsToEnd = (
