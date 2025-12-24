@@ -1,5 +1,6 @@
 // src/shared/components/SimpleWarningBadge.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { DetectionResult } from '@/shared/pii-detector';
 import { getApiClient, AiDetection } from '@/shared/api-client';
 
@@ -32,6 +33,11 @@ export function SimpleWarningBadge({
     initialAiDetections && initialAiDetections.length > 0 ? 'ai' : 'regex'
   );
   const [_, setSuccess] = useState<string>('');
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const [popupPosition, setPopupPosition] = useState<{
+    top: number;
+    right: number;
+  } | null>(null);
 
   // Update AI detections when prop changes
   useEffect(() => {
@@ -45,16 +51,59 @@ export function SimpleWarningBadge({
 
   const tooltipText = `PII Detected: ${detections.map(d => d.type).join(', ')}`;
 
+  // Calculate popup position based on badge position
+  const calculatePopupPosition = () => {
+    if (!badgeRef.current) return null;
+
+    const badgeRect = badgeRef.current.getBoundingClientRect();
+    const popupWidth = 320; // minWidth from popup styles
+
+    // Position popup below the badge
+    const top = badgeRect.bottom + 8; // 8px margin
+
+    // Calculate right position to align popup's right edge with badge's right edge
+    const right = window.innerWidth - badgeRect.right;
+
+    return { top, right };
+  };
+
   const handleTogglePopup = (e: React.MouseEvent) => {
     e.stopPropagation();
     const newState = !showPopup;
+
+    if (newState) {
+      // Calculate position when opening
+      const position = calculatePopupPosition();
+      setPopupPosition(position);
+    }
+
     setShowPopup(newState);
     onPopupStateChange(newState);
 
     if (!newState) {
       setAiError(null);
+      setPopupPosition(null);
     }
   };
+
+  // Update popup position on scroll/resize
+  useEffect(() => {
+    if (!showPopup) return;
+
+    const updatePosition = () => {
+      const position = calculatePopupPosition();
+      setPopupPosition(position);
+    };
+
+    // Update position on scroll and resize
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [showPopup]);
 
   const handleAiScan = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -145,394 +194,188 @@ export function SimpleWarningBadge({
   const hasAiDetections = aiDetections && aiDetections.length > 0;
   const hasAnyDetections = detections.length > 0 || hasAiDetections;
 
-  const renderPopup = () => (
-    <div
-      onClick={e => {
-        e.stopPropagation();
-        e.preventDefault();
-      }}
-      onMouseDown={e => {
-        e.stopPropagation();
-      }}
-      style={{
-        position: 'absolute',
-        top: '100%',
-        right: '0',
-        marginTop: '8px',
-        backgroundColor: 'white',
-        border: '1px solid #ddd',
-        borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-        padding: '16px',
-        minWidth: '320px',
-        maxWidth: '450px',
-        zIndex: 2147483647,
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        fontSize: '14px',
-      }}
-    >
-      {/* Show "No PII Detected" when there are no detections */}
-      {!hasAnyDetections && !aiScanning ? (
-        <div style={{ textAlign: 'center', padding: '20px' }}>
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
-          <div
-            style={{
-              fontWeight: '600',
-              fontSize: '16px',
-              color: '#333',
-              marginBottom: '8px',
-            }}
-          >
-            No PII Detected
-          </div>
-          <p style={{ color: '#666', fontSize: '14px', marginBottom: '16px' }}>
-            No sensitive information or pattern matches found in this field.
-          </p>
-          <button
-            type="button"
-            onClick={handleAiScan}
-            style={{
-              backgroundColor: '#9c27b0',
-              color: 'white',
-              border: 'none',
-              padding: '10px 20px',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '600',
-              width: '100%',
-            }}
-            onMouseEnter={e => {
-              (e.target as HTMLButtonElement).style.backgroundColor = '#7b1fa2';
-            }}
-            onMouseLeave={e => {
-              (e.target as HTMLButtonElement).style.backgroundColor = '#9c27b0';
-            }}
-          >
-            🤖 Run AI Scan
-          </button>
-          <p style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-            Premium feature - deeper analysis
-          </p>
-        </div>
-      ) : (
-        <>
-          <div
-            style={{
-              fontWeight: '600',
-              marginBottom: '12px',
-              fontSize: '16px',
-              color: '#333',
-            }}
-          >
-            ⚠️ PII Detected{' '}
-            {totalDetections > 0 && `(${totalDetections} items)`}
-          </div>
+  const renderPopup = () => {
+    if (!popupPosition) return null;
 
-          <div
-            style={{
-              display: 'flex',
-              gap: '8px',
-              marginBottom: '12px',
-              borderBottom: '1px solid #e0e0e0',
-            }}
-          >
-            <button
-              type="button"
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                setActiveTab('regex');
-              }}
+    const popupContent = (
+      <div
+        onClick={e => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        onMouseDown={e => {
+          e.stopPropagation();
+        }}
+        style={{
+          position: 'fixed',
+          top: `${popupPosition.top}px`,
+          right: `${popupPosition.right}px`,
+          backgroundColor: 'white',
+          border: '1px solid #ddd',
+          borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          padding: '16px',
+          minWidth: '320px',
+          maxWidth: '450px',
+          zIndex: 2147483647,
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          fontSize: '14px',
+        }}
+      >
+        {/* Show "No PII Detected" when there are no detections */}
+        {!hasAnyDetections && !aiScanning ? (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
+            <div
               style={{
-                flex: 1,
-                padding: '8px',
-                border: 'none',
-                background: 'none',
-                borderBottom:
-                  activeTab === 'regex'
-                    ? '2px solid #ff9800'
-                    : '2px solid transparent',
-                color: activeTab === 'regex' ? '#ff9800' : '#666',
-                fontWeight: activeTab === 'regex' ? '600' : '400',
-                cursor: 'pointer',
-                fontSize: '13px',
+                fontWeight: '600',
+                fontSize: '16px',
+                color: '#333',
+                marginBottom: '8px',
               }}
             >
-              Pattern Match {detections.length > 0 && `(${detections.length})`}
-            </button>
+              No PII Detected
+            </div>
+            <p
+              style={{ color: '#666', fontSize: '14px', marginBottom: '16px' }}
+            >
+              No sensitive information or pattern matches found in this field.
+            </p>
             <button
               type="button"
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                setActiveTab('ai');
-              }}
+              onClick={handleAiScan}
               style={{
-                flex: 1,
-                padding: '8px',
+                backgroundColor: '#9c27b0',
+                color: 'white',
                 border: 'none',
-                background: 'none',
-                borderBottom:
-                  activeTab === 'ai'
-                    ? '2px solid #9c27b0'
-                    : '2px solid transparent',
-                color: activeTab === 'ai' ? '#9c27b0' : '#666',
-                fontWeight: activeTab === 'ai' ? '600' : '400',
+                padding: '10px 20px',
+                borderRadius: '4px',
                 cursor: 'pointer',
-                fontSize: '13px',
+                fontSize: '14px',
+                fontWeight: '600',
+                width: '100%',
+              }}
+              onMouseEnter={e => {
+                (e.target as HTMLButtonElement).style.backgroundColor =
+                  '#7b1fa2';
+              }}
+              onMouseLeave={e => {
+                (e.target as HTMLButtonElement).style.backgroundColor =
+                  '#9c27b0';
               }}
             >
-              🤖 AI Scan{' '}
-              {aiDetections &&
-                aiDetections.length > 0 &&
-                `(${aiDetections.length})`}
+              🤖 Run AI Scan
             </button>
+            <p style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
+              Premium feature - deeper analysis
+            </p>
           </div>
+        ) : (
+          <>
+            <div
+              style={{
+                fontWeight: '600',
+                marginBottom: '12px',
+                fontSize: '16px',
+                color: '#333',
+              }}
+            >
+              ⚠️ PII Detected{' '}
+              {totalDetections > 0 && `(${totalDetections} items)`}
+            </div>
 
-          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-            {activeTab === 'regex' ? (
-              <>
-                {detections.length > 0 ? (
-                  detections.map((d, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: '10px',
-                        marginBottom: '8px',
-                        backgroundColor: '#fff3cd',
-                        borderRadius: '6px',
-                        border: '1px solid #ffc107',
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: '600',
-                          color: '#ff9800',
-                          marginBottom: '6px',
-                          fontSize: '12px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px',
-                        }}
-                      >
-                        {d.type.replace(/_/g, ' ')}
-                      </div>
-                      <div
-                        style={{
-                          marginBottom: '8px',
-                          color: '#666',
-                          wordBreak: 'break-all',
-                          fontFamily: 'monospace',
-                          fontSize: '13px',
-                          padding: '6px',
-                          backgroundColor: 'white',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        {d.value}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={e => handleAnonymizeClick(d, e)}
-                        style={{
-                          backgroundColor: '#ff9800',
-                          color: 'white',
-                          border: 'none',
-                          padding: '6px 12px',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '500',
-                          width: '100%',
-                        }}
-                        onMouseEnter={e => {
-                          (
-                            e.target as HTMLButtonElement
-                          ).style.backgroundColor = '#f57c00';
-                        }}
-                        onMouseLeave={e => {
-                          (
-                            e.target as HTMLButtonElement
-                          ).style.backgroundColor = '#ff9800';
-                        }}
-                      >
-                        Anonymize This
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <div
-                    style={{
-                      textAlign: 'center',
-                      padding: '20px',
-                      color: '#666',
-                    }}
-                  >
-                    No pattern-based detections found
-                  </div>
-                )}
+            <div
+              style={{
+                display: 'flex',
+                gap: '8px',
+                marginBottom: '12px',
+                borderBottom: '1px solid #e0e0e0',
+              }}
+            >
+              <button
+                type="button"
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setActiveTab('regex');
+                }}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  border: 'none',
+                  background: 'none',
+                  borderBottom:
+                    activeTab === 'regex'
+                      ? '2px solid #ff9800'
+                      : '2px solid transparent',
+                  color: activeTab === 'regex' ? '#ff9800' : '#666',
+                  fontWeight: activeTab === 'regex' ? '600' : '400',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                Pattern Match{' '}
+                {detections.length > 0 && `(${detections.length})`}
+              </button>
+              <button
+                type="button"
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setActiveTab('ai');
+                }}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  border: 'none',
+                  background: 'none',
+                  borderBottom:
+                    activeTab === 'ai'
+                      ? '2px solid #9c27b0'
+                      : '2px solid transparent',
+                  color: activeTab === 'ai' ? '#9c27b0' : '#666',
+                  fontWeight: activeTab === 'ai' ? '600' : '400',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                🤖 AI Scan{' '}
+                {aiDetections &&
+                  aiDetections.length > 0 &&
+                  `(${aiDetections.length})`}
+              </button>
+            </div>
 
-                {detections.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={handleAnonymizeAll}
-                    style={{
-                      backgroundColor: '#d32f2f',
-                      color: 'white',
-                      border: 'none',
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      width: '100%',
-                      marginTop: '8px',
-                    }}
-                    onMouseEnter={e => {
-                      (e.target as HTMLButtonElement).style.backgroundColor =
-                        '#c62828';
-                    }}
-                    onMouseLeave={e => {
-                      (e.target as HTMLButtonElement).style.backgroundColor =
-                        '#d32f2f';
-                    }}
-                  >
-                    Anonymize All ({detections.length})
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                {!aiDetections && !aiScanning && !aiError && (
-                  <div style={{ textAlign: 'center', padding: '20px' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '12px' }}>
-                      🤖
-                    </div>
-                    <p style={{ color: '#666', marginBottom: '16px' }}>
-                      Use AI to detect sensitive information that patterns might
-                      miss
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleAiScan}
-                      style={{
-                        backgroundColor: '#9c27b0',
-                        color: 'white',
-                        border: 'none',
-                        padding: '10px 20px',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '14px',
-                        fontWeight: '600',
-                      }}
-                      onMouseEnter={e => {
-                        (e.target as HTMLButtonElement).style.backgroundColor =
-                          '#7b1fa2';
-                      }}
-                      onMouseLeave={e => {
-                        (e.target as HTMLButtonElement).style.backgroundColor =
-                          '#9c27b0';
-                      }}
-                    >
-                      Run AI Scan
-                    </button>
-                    <p
-                      style={{
-                        fontSize: '11px',
-                        color: '#999',
-                        marginTop: '8px',
-                      }}
-                    >
-                      {autoAiEnabled
-                        ? 'Premium feature - deeper analysis'
-                        : 'Auto AI scan is off. Tap “Run AI Scan”.'}
-                    </p>
-                  </div>
-                )}
-
-                {aiScanning && (
-                  <div style={{ textAlign: 'center', padding: '20px' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '12px' }}>
-                      🔄
-                    </div>
-                    <p style={{ color: '#666' }}>Analyzing with AI...</p>
-                  </div>
-                )}
-
-                {aiError && (
-                  <div
-                    style={{
-                      padding: '15px',
-                      backgroundColor: '#ffebee',
-                      color: '#c62828',
-                      borderRadius: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {aiError}
-                  </div>
-                )}
-
-                {aiDetections && aiDetections.length > 0 && (
-                  <>
-                    <div
-                      style={{
-                        padding: '8px 12px',
-                        backgroundColor: '#f3e5f5',
-                        borderRadius: '4px',
-                        marginBottom: '12px',
-                        fontSize: '12px',
-                        color: '#7b1fa2',
-                        fontWeight: '500',
-                      }}
-                    >
-                      ✨ AI detected {aiDetections.length} potential issue
-                      {aiDetections.length !== 1 ? 's' : ''}
-                    </div>
-                    {aiDetections.map((d, idx) => (
+            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {activeTab === 'regex' ? (
+                <>
+                  {detections.length > 0 ? (
+                    detections.map((d, idx) => (
                       <div
                         key={idx}
                         style={{
                           padding: '10px',
                           marginBottom: '8px',
-                          backgroundColor: '#f3e5f5',
+                          backgroundColor: '#fff3cd',
                           borderRadius: '6px',
-                          border: '1px solid #ce93d8',
+                          border: '1px solid #ffc107',
                         }}
                       >
                         <div
                           style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
+                            fontWeight: '600',
+                            color: '#ff9800',
                             marginBottom: '6px',
+                            fontSize: '12px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px',
                           }}
                         >
-                          <div
-                            style={{
-                              fontWeight: '600',
-                              color: '#9c27b0',
-                              fontSize: '12px',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.5px',
-                            }}
-                          >
-                            {d.type.replace(/_/g, ' ')}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: '11px',
-                              color: '#666',
-                              backgroundColor: 'white',
-                              padding: '2px 6px',
-                              borderRadius: '3px',
-                            }}
-                          >
-                            {d.confidence}% confident
-                          </div>
+                          {d.type.replace(/_/g, ' ')}
                         </div>
                         <div
                           style={{
-                            marginBottom: '6px',
+                            marginBottom: '8px',
                             color: '#666',
                             wordBreak: 'break-all',
                             fontFamily: 'monospace',
@@ -544,25 +387,11 @@ export function SimpleWarningBadge({
                         >
                           {d.value}
                         </div>
-                        <div
-                          style={{
-                            fontSize: '12px',
-                            color: '#666',
-                            fontStyle: 'italic',
-                            marginBottom: '8px',
-                          }}
-                        >
-                          {d.reason}
-                        </div>
                         <button
                           type="button"
-                          onClick={e => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleAnonymizeClick(d);
-                          }}
+                          onClick={e => handleAnonymizeClick(d, e)}
                           style={{
-                            backgroundColor: '#9c27b0',
+                            backgroundColor: '#ff9800',
                             color: 'white',
                             border: 'none',
                             padding: '6px 12px',
@@ -575,76 +404,309 @@ export function SimpleWarningBadge({
                           onMouseEnter={e => {
                             (
                               e.target as HTMLButtonElement
-                            ).style.backgroundColor = '#7b1fa2';
+                            ).style.backgroundColor = '#f57c00';
                           }}
                           onMouseLeave={e => {
                             (
                               e.target as HTMLButtonElement
-                            ).style.backgroundColor = '#9c27b0';
+                            ).style.backgroundColor = '#ff9800';
                           }}
                         >
                           Anonymize This
                         </button>
                       </div>
-                    ))}
+                    ))
+                  ) : (
+                    <div
+                      style={{
+                        textAlign: 'center',
+                        padding: '20px',
+                        color: '#666',
+                      }}
+                    >
+                      No pattern-based detections found
+                    </div>
+                  )}
 
-                    {aiDetections.length > 1 && (
+                  {detections.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleAnonymizeAll}
+                      style={{
+                        backgroundColor: '#d32f2f',
+                        color: 'white',
+                        border: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        width: '100%',
+                        marginTop: '8px',
+                      }}
+                      onMouseEnter={e => {
+                        (e.target as HTMLButtonElement).style.backgroundColor =
+                          '#c62828';
+                      }}
+                      onMouseLeave={e => {
+                        (e.target as HTMLButtonElement).style.backgroundColor =
+                          '#d32f2f';
+                      }}
+                    >
+                      Anonymize All ({detections.length})
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {!aiDetections && !aiScanning && !aiError && (
+                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '12px' }}>
+                        🤖
+                      </div>
+                      <p style={{ color: '#666', marginBottom: '16px' }}>
+                        Use AI to detect sensitive information that patterns
+                        might miss
+                      </p>
                       <button
                         type="button"
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleAnonymizeAllAi();
-                        }}
+                        onClick={handleAiScan}
                         style={{
-                          backgroundColor: '#d32f2f',
+                          backgroundColor: '#9c27b0',
                           color: 'white',
                           border: 'none',
-                          padding: '8px 16px',
+                          padding: '10px 20px',
                           borderRadius: '4px',
                           cursor: 'pointer',
                           fontSize: '14px',
                           fontWeight: '600',
-                          width: '100%',
-                          marginTop: '8px',
                         }}
                         onMouseEnter={e => {
                           (
                             e.target as HTMLButtonElement
-                          ).style.backgroundColor = '#c62828';
+                          ).style.backgroundColor = '#7b1fa2';
                         }}
                         onMouseLeave={e => {
                           (
                             e.target as HTMLButtonElement
-                          ).style.backgroundColor = '#d32f2f';
+                          ).style.backgroundColor = '#9c27b0';
                         }}
                       >
-                        Redact All ({aiDetections.length})
+                        Run AI Scan
                       </button>
-                    )}
-                  </>
-                )}
-
-                {aiDetections &&
-                  aiDetections.length === 0 &&
-                  !aiScanning &&
-                  !aiError && (
-                    <div style={{ textAlign: 'center', padding: '20px' }}>
-                      <div style={{ fontSize: '48px', marginBottom: '12px' }}>
-                        ✅
-                      </div>
-                      <p style={{ color: '#666' }}>
-                        AI scan complete - no additional PII detected
+                      <p
+                        style={{
+                          fontSize: '11px',
+                          color: '#999',
+                          marginTop: '8px',
+                        }}
+                      >
+                        {autoAiEnabled
+                          ? 'Premium feature - deeper analysis'
+                          : 'Auto AI scan is off. Tap “Run AI Scan”.'}
                       </p>
                     </div>
                   )}
-              </>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
+
+                  {aiScanning && (
+                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '12px' }}>
+                        🔄
+                      </div>
+                      <p style={{ color: '#666' }}>Analyzing with AI...</p>
+                    </div>
+                  )}
+
+                  {aiError && (
+                    <div
+                      style={{
+                        padding: '15px',
+                        backgroundColor: '#ffebee',
+                        color: '#c62828',
+                        borderRadius: '4px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {aiError}
+                    </div>
+                  )}
+
+                  {aiDetections && aiDetections.length > 0 && (
+                    <>
+                      <div
+                        style={{
+                          padding: '8px 12px',
+                          backgroundColor: '#f3e5f5',
+                          borderRadius: '4px',
+                          marginBottom: '12px',
+                          fontSize: '12px',
+                          color: '#7b1fa2',
+                          fontWeight: '500',
+                        }}
+                      >
+                        ✨ AI detected {aiDetections.length} potential issue
+                        {aiDetections.length !== 1 ? 's' : ''}
+                      </div>
+                      {aiDetections.map((d, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '10px',
+                            marginBottom: '8px',
+                            backgroundColor: '#f3e5f5',
+                            borderRadius: '6px',
+                            border: '1px solid #ce93d8',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontWeight: '600',
+                                color: '#9c27b0',
+                                fontSize: '12px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                              }}
+                            >
+                              {d.type.replace(/_/g, ' ')}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: '11px',
+                                color: '#666',
+                                backgroundColor: 'white',
+                                padding: '2px 6px',
+                                borderRadius: '3px',
+                              }}
+                            >
+                              {d.confidence}% confident
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              marginBottom: '6px',
+                              color: '#666',
+                              wordBreak: 'break-all',
+                              fontFamily: 'monospace',
+                              fontSize: '13px',
+                              padding: '6px',
+                              backgroundColor: 'white',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            {d.value}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              color: '#666',
+                              fontStyle: 'italic',
+                              marginBottom: '8px',
+                            }}
+                          >
+                            {d.reason}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleAnonymizeClick(d);
+                            }}
+                            style={{
+                              backgroundColor: '#9c27b0',
+                              color: 'white',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              fontWeight: '500',
+                              width: '100%',
+                            }}
+                            onMouseEnter={e => {
+                              (
+                                e.target as HTMLButtonElement
+                              ).style.backgroundColor = '#7b1fa2';
+                            }}
+                            onMouseLeave={e => {
+                              (
+                                e.target as HTMLButtonElement
+                              ).style.backgroundColor = '#9c27b0';
+                            }}
+                          >
+                            Anonymize This
+                          </button>
+                        </div>
+                      ))}
+
+                      {aiDetections.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleAnonymizeAllAi();
+                          }}
+                          style={{
+                            backgroundColor: '#d32f2f',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            width: '100%',
+                            marginTop: '8px',
+                          }}
+                          onMouseEnter={e => {
+                            (
+                              e.target as HTMLButtonElement
+                            ).style.backgroundColor = '#c62828';
+                          }}
+                          onMouseLeave={e => {
+                            (
+                              e.target as HTMLButtonElement
+                            ).style.backgroundColor = '#d32f2f';
+                          }}
+                        >
+                          Redact All ({aiDetections.length})
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {aiDetections &&
+                    aiDetections.length === 0 &&
+                    !aiScanning &&
+                    !aiError && (
+                      <div style={{ textAlign: 'center', padding: '20px' }}>
+                        <div style={{ fontSize: '48px', marginBottom: '12px' }}>
+                          ✅
+                        </div>
+                        <p style={{ color: '#666' }}>
+                          AI scan complete - no additional PII detected
+                        </p>
+                      </div>
+                    )}
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+
+    // Render popup in a portal at document body level to avoid overflow clipping
+    return createPortal(popupContent, document.body);
+  };
 
   // Always show dot when alwaysShowDot is true, or show small purple dot for AI-only detections
   if (variant === 'dot' || (alwaysShowDot && !hasAnyDetections)) {
@@ -657,6 +719,7 @@ export function SimpleWarningBadge({
     return (
       <div style={{ position: 'relative', zIndex: 10000 }}>
         <div
+          ref={badgeRef}
           title={dotTitle}
           onClick={handleTogglePopup}
           style={{
@@ -696,6 +759,7 @@ export function SimpleWarningBadge({
   return (
     <div style={{ position: 'relative', zIndex: 10000 }}>
       <div
+        ref={badgeRef}
         title={tooltipText}
         onClick={handleTogglePopup}
         style={{
