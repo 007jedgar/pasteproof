@@ -12,7 +12,7 @@ export default defineConfig({
     name: 'PasteProof',
     description:
       'Your pasteboard bodyguard. Prevents you from pasting sensitive data into the wrong fields.',
-    version: '0.2.0',
+    version: '0.2.1',
     permissions: [
       'storage', // For storing user settings
       'activeTab', // Required for some interactions
