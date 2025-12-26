@@ -36,16 +36,16 @@ pnpm install
 
 ```bash
 # Create KV namespaces
-wrangler kv:namespace create "WHITELIST_STORE"
-wrangler kv:namespace create "PATTERNS_STORE"
-wrangler kv:namespace create "DETECTIONS_STORE"
-wrangler kv:namespace create "LOGS_STORE"
+wrangler kv namespace create "WHITELIST_STORE"
+wrangler kv namespace create "PATTERNS_STORE"
+wrangler kv namespace create "DETECTIONS_STORE"
+wrangler kv namespace create "LOGS_STORE"
 
 # Create preview namespaces
-wrangler kv:namespace create "WHITELIST_STORE" --preview
-wrangler kv:namespace create "PATTERNS_STORE" --preview
-wrangler kv:namespace create "DETECTIONS_STORE" --preview
-wrangler kv:namespace create "LOGS_STORE" --preview
+wrangler kv namespace create "WHITELIST_STORE" --preview
+wrangler kv namespace create "PATTERNS_STORE" --preview
+wrangler kv namespace create "DETECTIONS_STORE" --preview
+wrangler kv namespace create "LOGS_STORE" --preview
 ```
 
 3. Update `wrangler.toml` with the KV namespace IDs from step 2.
@@ -203,7 +203,7 @@ To use a custom domain instead of `*.workers.dev`:
 **KV namespace errors**
 
 - Verify all KV namespace IDs are correct in `wrangler.toml`
-- Ensure namespaces exist: `wrangler kv:namespace list`
+- Ensure namespaces exist: `wrangler kv namespace list`
 
 **API key not working**
 
