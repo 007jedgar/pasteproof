@@ -255,6 +255,7 @@ export default defineContentScript({
     let dotRoot: Root | null = null;
     let isPopupOpen = false;
     let contextMenuInput: HTMLInputElement | HTMLTextAreaElement | null = null;
+    let isAnonymizing = false; // Flag to prevent input handlers from interfering during anonymization
 
     // Initialize team policies on page load
     async function initializeWithTeamPolicies() {
@@ -601,45 +602,93 @@ export default defineContentScript({
       }
     };
 
+    // Helper function to replace text in DOM while preserving structure
+    const replaceTextInNode = (
+      node: Node,
+      searchValue: string,
+      replaceValue: string
+    ): boolean => {
+      let replaced = false;
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        if (text.includes(searchValue)) {
+          node.textContent = text.replace(
+            new RegExp(searchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+            replaceValue
+          );
+          replaced = true;
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        // Recursively process child nodes
+        const children = Array.from(node.childNodes);
+        for (const child of children) {
+          if (replaceTextInNode(child, searchValue, replaceValue)) {
+            replaced = true;
+          }
+        }
+      }
+
+      return replaced;
+    };
+
     const handleAnonymize = async (detections: DetectionResult[]) => {
       if (!activeInput) return;
 
+      // Set flag to prevent input handlers from interfering
+      isAnonymizing = true;
+
       const isContentEditable =
         activeInput.getAttribute('contenteditable') === 'true';
-      let newValue: string;
-
-      if (isContentEditable) {
-        newValue = activeInput.textContent || '';
-      } else {
-        newValue = (activeInput as HTMLInputElement | HTMLTextAreaElement)
-          .value;
-      }
 
       // Sort detections by value length (longest first) to avoid partial replacements
       const sortedDetections = [...detections].sort(
         (a, b) => b.value.length - a.value.length
       );
 
-      // Replace all detected values with anonymized versions
-      // SECURITY: Use literal string replacement to prevent regex injection
-      sortedDetections.forEach(d => {
-        const anonymized = anonymizeValue(d);
-        // Escape special regex characters in the search string for literal replacement
-        const escapedValue = d.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        newValue = newValue.replace(new RegExp(escapedValue, 'g'), anonymized);
-      });
-
       // Set the new value based on element type
       if (isContentEditable) {
-        activeInput.textContent = newValue;
+        // Save current AI detections before modifying content
+        const currentAiDetections = badgeRoot
+          ? (activeInput as any).__pasteproofAiDetections
+          : null;
+
+        // Use DOM manipulation to preserve HTML structure, formatting, and line breaks
+        // This avoids the double-spacing issue that occurs with innerText
+        sortedDetections.forEach(d => {
+          const anonymized = anonymizeValue(d);
+          if (activeInput) {
+            replaceTextInNode(activeInput as Node, d.value, anonymized);
+          }
+        });
+
         activeInput.dispatchEvent(
           new Event('input', { bubbles: true, cancelable: true })
         );
         activeInput.dispatchEvent(
           new Event('change', { bubbles: true, cancelable: true })
         );
+
+        // Restore AI detections after setting new value
+        if (currentAiDetections) {
+          (activeInput as any).__pasteproofAiDetections = currentAiDetections;
+        }
       } else {
+        // For regular inputs/textareas, do string replacement
         const input = activeInput as HTMLInputElement | HTMLTextAreaElement;
+        let newValue = input.value;
+
+        // Replace all detected values with anonymized versions
+        // SECURITY: Use literal string replacement to prevent regex injection
+        sortedDetections.forEach(d => {
+          const anonymized = anonymizeValue(d);
+          // Escape special regex characters in the search string for literal replacement
+          const escapedValue = d.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          newValue = newValue.replace(
+            new RegExp(escapedValue, 'g'),
+            anonymized
+          );
+        });
 
         const nativeSetter = Object.getOwnPropertyDescriptor(
           input.tagName === 'INPUT'
@@ -701,48 +750,74 @@ export default defineContentScript({
         });
       });
 
+      // Get existing AI detections before clearing cache
+      const existingAiDetections =
+        (activeInput as any).__pasteproofAiDetections || null;
+
+      // Update existing AI detections by removing anonymized values IMMEDIATELY
+      let updatedAiDetections = existingAiDetections;
+      if (existingAiDetections && existingAiDetections.length > 0) {
+        // Filter out AI detections that were just anonymized
+        const anonymizedValues = new Set(sortedDetections.map(d => d.value));
+        updatedAiDetections = existingAiDetections.filter(
+          (aiDet: any) => !anonymizedValues.has(aiDet.value)
+        );
+
+        // Store updated AI detections
+        (activeInput as any).__pasteproofAiDetections = updatedAiDetections;
+      }
+
       // Clear AI scan cache after anonymization
       aiScanOptimizer.clearCache();
 
-      // Re-scan after anonymization WITHOUT AI detections initially
-      // This prevents showing stale AI results
-      setTimeout(async () => {
-        if (!activeInput) return;
+      // Immediately get new pattern detection results (no setTimeout delay)
+      const expectedTypes = getExpectedInputType(activeInput);
+      const skipAi = shouldSkipAiForInput(activeInput);
+      const currentValue = getInputValue(activeInput);
+      const results = detectPii(currentValue);
+      const filteredResults = filterExpectedDetections(results, expectedTypes);
 
-        const expectedTypes = getExpectedInputType(activeInput);
-        const skipAi = shouldSkipAiForInput(activeInput);
+      // Immediately update the badge with new pattern results and preserved AI detections
+      // This prevents the badge from disappearing
+      handleDetection(
+        filteredResults,
+        updatedAiDetections && updatedAiDetections.length > 0
+          ? updatedAiDetections
+          : null
+      );
 
-        const currentValue = getInputValue(activeInput);
-        const results = detectPii(currentValue);
-        const filteredResults = filterExpectedDetections(
-          results,
-          expectedTypes
-        );
+      // Reset flag after badge update is complete
+      // Use setTimeout to ensure React has finished rendering
+      setTimeout(() => {
+        isAnonymizing = false;
+      }, 50);
 
-        // First show just pattern-based results (AI cache is cleared)
-        handleDetection(filteredResults, null);
+      // Optionally trigger a fresh AI scan after a short delay
+      // This allows users to see immediate feedback before AI re-scans
+      if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(currentValue)) {
+        setTimeout(async () => {
+          if (!activeInput) return;
 
-        // Optionally trigger a fresh AI scan after a short delay
-        // This allows users to see immediate feedback before AI re-scans
-        if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(currentValue)) {
-          setTimeout(async () => {
-            if (!activeInput) return;
+          const freshExpectedTypes = getExpectedInputType(activeInput);
+          const freshResults = detectPii(getInputValue(activeInput));
+          const freshFiltered = filterExpectedDetections(
+            freshResults,
+            freshExpectedTypes
+          );
+          const freshAiDetections = await performAiScan(
+            activeInput,
+            currentValue,
+            freshFiltered
+          );
 
-            const freshExpectedTypes = getExpectedInputType(activeInput);
-            const freshResults = detectPii(getInputValue(activeInput));
-            const freshFiltered = filterExpectedDetections(
-              freshResults,
-              freshExpectedTypes
-            );
-            const freshAiDetections = await performAiScan(
-              activeInput,
-              currentValue,
-              freshFiltered
-            );
-            handleDetection(freshFiltered, freshAiDetections);
-          }, 500); // Wait 500ms before re-running AI scan
-        }
-      }, 100);
+          // Store fresh AI detections
+          if (freshAiDetections) {
+            (activeInput as any).__pasteproofAiDetections = freshAiDetections;
+          }
+
+          handleDetection(freshFiltered, freshAiDetections);
+        }, 500); // Wait 500ms before re-running AI scan
+      }
     };
 
     const isAlreadyRedacted = (text: string): boolean => {
@@ -1248,6 +1323,11 @@ export default defineContentScript({
 
       if (!activeInput) return;
 
+      // Store AI detections on the input element for persistence
+      if (aiDetections) {
+        (activeInput as any).__pasteproofAiDetections = aiDetections;
+      }
+
       // Show full badge if there are actual detections (pattern or AI)
       if (hasAnyDetections) {
         removeDot(); // Remove dot if full badge is shown
@@ -1364,7 +1444,8 @@ export default defineContentScript({
         return (element as HTMLInputElement | HTMLTextAreaElement).value;
       }
       if (element.getAttribute('contenteditable') === 'true') {
-        return element.textContent || '';
+        // Use innerText to preserve line breaks (unlike textContent)
+        return (element as HTMLElement).innerText || '';
       }
       return '';
     };
@@ -1434,8 +1515,13 @@ export default defineContentScript({
       const results = detectPii(text);
       const filteredResults = filterExpectedDetections(results, expectedTypes);
 
+      // Get existing AI detections to preserve them if not running a new AI scan
+      const existingAiDetections =
+        (input as any).__pasteproofAiDetections || null;
+
       // Show pattern detections immediately for instant feedback
-      handleDetection(filteredResults, null);
+      // Preserve existing AI detections if not running a new scan
+      handleDetection(filteredResults, existingAiDetections);
 
       // Then trigger AI scan asynchronously and update when ready
       if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(text)) {
@@ -1480,6 +1566,9 @@ export default defineContentScript({
       input: HTMLInputElement | HTMLTextAreaElement | HTMLElement
     ) => {
       const handler = () => {
+        // Skip scanning if we're in the middle of anonymizing
+        if (isAnonymizing) return;
+
         if (activeInput === input) {
           debouncedScan(getInputValue(input), input);
         }
@@ -1487,6 +1576,9 @@ export default defineContentScript({
 
       input.addEventListener('input', handler);
       input.addEventListener('paste', () => {
+        // Skip if we're in the middle of anonymizing
+        if (isAnonymizing) return;
+
         // Wait for pasted content to be inserted, then trigger immediate scan
         setTimeout(async () => {
           if (activeInput !== input) return;
@@ -1507,6 +1599,7 @@ export default defineContentScript({
           );
 
           // Show pattern detections immediately for instant feedback
+          // For paste, we start fresh with no AI detections (content is new)
           handleDetection(filteredResults, null);
 
           // Then trigger AI scan asynchronously and update when ready
@@ -1573,8 +1666,13 @@ export default defineContentScript({
           expectedTypes
         );
 
+        // Get existing AI detections (in case user is refocusing on a previously scanned field)
+        const existingAiDetections =
+          (activeInput as any).__pasteproofAiDetections || null;
+
         // Show pattern detections immediately for instant feedback
-        handleDetection(filteredResults, null);
+        // Preserve existing AI detections if available
+        handleDetection(filteredResults, existingAiDetections);
 
         // Then trigger AI scan asynchronously and update when ready
         if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(currentValue)) {
