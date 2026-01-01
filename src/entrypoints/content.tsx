@@ -256,6 +256,7 @@ export default defineContentScript({
     let isPopupOpen = false;
     let contextMenuInput: HTMLInputElement | HTMLTextAreaElement | null = null;
     let isAnonymizing = false; // Flag to prevent input handlers from interfering during anonymization
+    let keepPopupOpenAfterAnonymize = false; // Flag to keep popup open during single item anonymization
 
     // Initialize team policies on page load
     async function initializeWithTeamPolicies() {
@@ -638,6 +639,9 @@ export default defineContentScript({
       // Set flag to prevent input handlers from interfering
       isAnonymizing = true;
 
+      // Keep popup open if only anonymizing single items (not "Anonymize All")
+      keepPopupOpenAfterAnonymize = detections.length === 1 && isPopupOpen;
+
       const isContentEditable =
         activeInput.getAttribute('contenteditable') === 'true';
 
@@ -726,12 +730,16 @@ export default defineContentScript({
           }
         });
 
-        setTimeout(() => {
-          input.blur();
+        // Don't blur/focus during single anonymization - it closes the popup
+        // Only do this for "Anonymize All" scenarios
+        if (!keepPopupOpenAfterAnonymize) {
           setTimeout(() => {
-            input.focus();
+            input.blur();
+            setTimeout(() => {
+              input.focus();
+            }, 10);
           }, 10);
-        }, 10);
+        }
       }
 
       // Log anonymizations
@@ -786,10 +794,11 @@ export default defineContentScript({
           : null
       );
 
-      // Reset flag after badge update is complete
+      // Reset flags after badge update is complete
       // Use setTimeout to ensure React has finished rendering
       setTimeout(() => {
         isAnonymizing = false;
+        keepPopupOpenAfterAnonymize = false;
       }, 50);
 
       // Optionally trigger a fresh AI scan after a short delay
@@ -1697,7 +1706,8 @@ export default defineContentScript({
         if (
           badgeContainer?.contains(relatedTarget) ||
           dotContainer?.contains(relatedTarget) ||
-          isPopupOpen
+          isPopupOpen ||
+          keepPopupOpenAfterAnonymize // Don't close during single anonymization
         ) {
           return;
         }
@@ -1705,7 +1715,7 @@ export default defineContentScript({
         setTimeout(() => {
           const currentFocus = document.activeElement;
 
-          if (isPopupOpen) {
+          if (isPopupOpen || keepPopupOpenAfterAnonymize) {
             return;
           }
 

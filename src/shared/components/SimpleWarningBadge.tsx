@@ -35,8 +35,10 @@ export function SimpleWarningBadge({
   const [_, setSuccess] = useState<string>('');
   const badgeRef = useRef<HTMLDivElement>(null);
   const [popupPosition, setPopupPosition] = useState<{
-    top: number;
+    top?: number;
     right: number;
+    bottom?: number;
+    positionedAbove?: boolean;
   } | null>(null);
 
   // Update AI detections when prop changes
@@ -51,20 +53,47 @@ export function SimpleWarningBadge({
 
   const tooltipText = `PII Detected: ${detections.map(d => d.type).join(', ')}`;
 
-  // Calculate popup position based on badge position
+  // Calculate popup position based on badge position and available space
   const calculatePopupPosition = () => {
     if (!badgeRef.current) return null;
 
     const badgeRect = badgeRef.current.getBoundingClientRect();
     const popupWidth = 320; // minWidth from popup styles
+    const estimatedPopupHeight = 450; // Estimated max height of popup with content
+    const margin = 8; // Margin between badge and popup
+    const safetyMargin = 20; // Extra margin from viewport edges
 
-    // Position popup below the badge
-    const top = badgeRect.bottom + 8; // 8px margin
+    // Calculate available space below and above the badge
+    // Account for any fixed elements by using actual viewport dimensions
+    const spaceBelow = window.innerHeight - badgeRect.bottom - safetyMargin;
+    const spaceAbove = badgeRect.top - safetyMargin;
+
+    // More aggressive positioning logic:
+    // If there's less than the estimated height below AND more space above, position above
+    // OR if badge is in the bottom 40% of the viewport, prefer above
+    const badgeInBottomSection = badgeRect.bottom > window.innerHeight * 0.6;
+    const shouldPositionAbove =
+      (spaceBelow < estimatedPopupHeight && spaceAbove > spaceBelow) ||
+      (badgeInBottomSection && spaceAbove >= 200); // Minimum 200px above
+
+    let top: number | undefined;
+    let bottom: number | undefined;
+
+    if (shouldPositionAbove) {
+      // Position above the badge
+      // Calculate bottom from viewport bottom to badge top, plus margin
+      bottom = window.innerHeight - badgeRect.top + margin;
+      top = undefined;
+    } else {
+      // Position below the badge (default)
+      top = badgeRect.bottom + margin;
+      bottom = undefined;
+    }
 
     // Calculate right position to align popup's right edge with badge's right edge
     const right = window.innerWidth - badgeRect.right;
 
-    return { top, right };
+    return { top, right, bottom, positionedAbove: shouldPositionAbove };
   };
 
   const handleTogglePopup = (e: React.MouseEvent) => {
@@ -163,12 +192,15 @@ export function SimpleWarningBadge({
         : detection;
 
     onAnonymize([detectionToAnonymize]);
-    setShowPopup(false);
-    onPopupStateChange(false);
+    // Don't close popup on single anonymize - keep it open for multiple redactions
+    // User can click outside or press escape to close
+    // setShowPopup(false);
+    // onPopupStateChange(false);
   };
 
   const handleAnonymizeAll = () => {
     onAnonymize(detections);
+    // Close popup after "Anonymize All" since all items are redacted
     setShowPopup(false);
     onPopupStateChange(false);
   };
@@ -183,6 +215,7 @@ export function SimpleWarningBadge({
     }));
 
     onAnonymize(detectionsToAnonymize);
+    // Close popup after "Anonymize All" since all items are redacted
     setShowPopup(false);
     onPopupStateChange(false);
   };
@@ -197,6 +230,31 @@ export function SimpleWarningBadge({
   const renderPopup = () => {
     if (!popupPosition) return null;
 
+    // Build style object based on positioning
+    const popupStyle: React.CSSProperties = {
+      position: 'fixed',
+      right: `${popupPosition.right}px`,
+      backgroundColor: 'white',
+      border: '1px solid #ddd',
+      borderRadius: '8px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+      padding: '16px',
+      minWidth: '320px',
+      maxWidth: '450px',
+      zIndex: 2147483647,
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      fontSize: '14px',
+      maxHeight: '80vh', // Limit height to 80% of viewport
+      overflowY: 'auto', // Allow scrolling if content is too tall
+    };
+
+    // Add either top or bottom positioning
+    if (popupPosition.positionedAbove && popupPosition.bottom !== undefined) {
+      popupStyle.bottom = `${popupPosition.bottom}px`;
+    } else if (popupPosition.top !== undefined) {
+      popupStyle.top = `${popupPosition.top}px`;
+    }
+
     const popupContent = (
       <div
         onClick={e => {
@@ -206,21 +264,7 @@ export function SimpleWarningBadge({
         onMouseDown={e => {
           e.stopPropagation();
         }}
-        style={{
-          position: 'fixed',
-          top: `${popupPosition.top}px`,
-          right: `${popupPosition.right}px`,
-          backgroundColor: 'white',
-          border: '1px solid #ddd',
-          borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          padding: '16px',
-          minWidth: '320px',
-          maxWidth: '450px',
-          zIndex: 2147483647,
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-          fontSize: '14px',
-        }}
+        style={popupStyle}
       >
         {/* Show "No PII Detected" when there are no detections */}
         {!hasAnyDetections && !aiScanning ? (
