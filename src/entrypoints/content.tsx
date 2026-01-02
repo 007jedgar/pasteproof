@@ -13,6 +13,10 @@ import {
 } from '@/shared/api-client';
 import { SimpleWarningBadge } from '@/shared/components';
 import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
+import { getOnnxDetector } from '@/shared/onnx-client';
+
+// Log that ONNX client is imported
+console.log('[Content] ONNX client imported:', typeof getOnnxDetector);
 
 const MIN_TEXT_LENGTH = 10;
 const MAX_TEXT_LENGTH = 5000;
@@ -1013,20 +1017,30 @@ export default defineContentScript({
       text: string,
       existingPatternDetections: DetectionResult[] = []
     ): Promise<any[] | null> => {
+      console.log('[Content] performAiScan called', {
+        textLength: text.length,
+        textPreview: text.substring(0, 100),
+      });
+
       const textPreview =
         text.length > 50 ? text.substring(0, 50) + '...' : text;
 
       if (!shouldScanText(text)) {
+        console.log(
+          '[Content] performAiScan: Skipping - shouldScanText returned false'
+        );
         return null;
       }
 
       if (isAlreadyRedacted(text) && !hasMinimalContent(text)) {
+        console.log('[Content] performAiScan: Skipping - already redacted');
         return null;
       }
 
       // Check cache first using the optimizer
       const cachedResult = aiScanOptimizer.getCachedResult(text);
       if (cachedResult !== null) {
+        console.log('[Content] performAiScan: Using cached result');
         return cachedResult;
       }
 
@@ -1082,9 +1096,15 @@ export default defineContentScript({
       // Redact detected secrets before sending to AI (use all local detections for redaction)
       const redactedText = redactSecrets(text, localDetections);
 
+      console.log('[Content] performAiScan: Proceeding to AI detection', {
+        redactedTextLength: redactedText.length,
+        localDetectionsCount: localDetections.length,
+      });
+
       try {
         const apiClient = getApiClient();
         if (!apiClient) {
+          console.log('[Content] performAiScan: No API client available');
           return null;
         }
 
@@ -1094,14 +1114,96 @@ export default defineContentScript({
         const expectedTypes = getExpectedInputType(input);
         const fieldType = getFieldType(input, expectedTypes);
 
-        // Send redacted text to AI
-        const result = await apiClient.analyzeContext(
-          redactedText,
-          window.location.hostname,
-          fieldType
+        console.log(
+          '[Content] performAiScan: About to start parallel detection',
+          {
+            fieldType,
+            hostname: window.location.hostname,
+          }
         );
 
+        // Run both API and ONNX detection in parallel for comparison
+        console.log('[Content] Starting parallel AI detection (API + ONNX)...');
+
+        // Try to get ONNX detector first to see if it initializes
+        let onnxDetector;
+        try {
+          onnxDetector = getOnnxDetector();
+          console.log('[Content] ONNX detector obtained:', !!onnxDetector);
+        } catch (error) {
+          console.error('[Content] Failed to get ONNX detector:', error);
+        }
+
+        const [apiResult, onnxResult] = await Promise.allSettled([
+          apiClient.analyzeContext(
+            redactedText,
+            window.location.hostname,
+            fieldType
+          ),
+          (async () => {
+            try {
+              console.log('[Content] Starting ONNX detection...');
+              const detector = getOnnxDetector();
+              console.log('[Content] ONNX detector instance:', !!detector);
+              const result = await detector.analyzeContext(
+                redactedText,
+                window.location.hostname,
+                fieldType
+              );
+              console.log('[Content] ONNX detection completed successfully');
+              return result;
+            } catch (error) {
+              console.error('[Content] ONNX detection error:', error);
+              // Return empty result on error so we can still use API results
+              return {
+                hasPII: false,
+                confidence: 0,
+                detections: [],
+                risk_level: 'low' as const,
+              };
+            }
+          })(),
+        ]);
+
+        // Extract results (handle Promise.allSettled format)
+        const result =
+          apiResult.status === 'fulfilled'
+            ? apiResult.value
+            : {
+                hasPII: false,
+                confidence: 0,
+                detections: [],
+                risk_level: 'low' as const,
+              };
+
+        const onnxDetectionResult =
+          onnxResult.status === 'fulfilled'
+            ? onnxResult.value
+            : {
+                hasPII: false,
+                confidence: 0,
+                detections: [],
+                risk_level: 'low' as const,
+              };
+
         const duration = Math.round(performance.now() - startTime);
+
+        // Log comparison
+        console.log('[Content] AI Detection Comparison:', {
+          duration: `${duration}ms`,
+          api: {
+            hasPII: result.hasPII,
+            detectionCount: result.detections.length,
+            confidence: result.confidence,
+            riskLevel: result.risk_level,
+          },
+          onnx: {
+            hasPII: onnxDetectionResult.hasPII,
+            detectionCount: onnxDetectionResult.detections.length,
+            confidence: onnxDetectionResult.confidence,
+            riskLevel: onnxDetectionResult.risk_level,
+          },
+        });
 
         const detections = result.detections || [];
 
