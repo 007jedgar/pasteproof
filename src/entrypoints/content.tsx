@@ -13,6 +13,7 @@ import {
 } from '@/shared/api-client';
 import { SimpleWarningBadge } from '@/shared/components';
 import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
+import { startAiScan, completeAiScan, failAiScan } from '@/shared/ai-scan-state';
 
 const MIN_TEXT_LENGTH = 10;
 const MAX_TEXT_LENGTH = 5000;
@@ -1088,6 +1089,9 @@ export default defineContentScript({
           return null;
         }
 
+        // Track AI scan start
+        await startAiScan(window.location.hostname, textPreview);
+
         const startTime = performance.now();
 
         // Determine fieldType from input element
@@ -1166,9 +1170,15 @@ export default defineContentScript({
         // Cache the result using the optimizer
         aiScanOptimizer.cacheResult(text, filteredDetections);
 
+        // Track AI scan completion
+        await completeAiScan(filteredDetections.length);
+
         return filteredDetections;
       } catch (error: any) {
         console.error('AI scan error:', error);
+        
+        // Track AI scan failure
+        await failAiScan(error.message || 'Unknown error');
         if (
           error.message?.includes('Premium subscription required') ||
           error.message?.includes('Rate limit exceeded')
