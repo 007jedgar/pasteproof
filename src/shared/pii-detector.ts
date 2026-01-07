@@ -17,6 +17,7 @@ export type PiiType =
   | 'GDPR_PASSPORT'
   | 'GDPR_NIN'
   | 'GDPR_IBAN'
+  | 'SUSPICIOUS_ID' // For suspicious numeric IDs found in JSON
   | 'CUSTOM'; // For user-defined patterns
 
 export type DetectionResult = {
@@ -220,6 +221,129 @@ export function setCustomPatterns(patterns: CustomPattern[]) {
   });
 }
 
+/**
+ * Detect if the input contains JSON data
+ */
+function isJsonContent(text: string): boolean {
+  // Trim whitespace
+  const trimmed = text.trim();
+
+  // Check for JSON object/array structure
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      // Still might be JSON-like even if not perfectly valid
+      // Check for common JSON patterns
+      return /[{[][\s\S]*["'][\w_-]+["'][\s\S]*:/.test(trimmed);
+    }
+  }
+
+  // Check if text contains JSON-like structures embedded within
+  // Look for patterns like: "key": "value" or 'key': 'value'
+  const hasJsonPattern = /["'][\w_-]+["']\s*:\s*["'\[{]/.test(text);
+  if (hasJsonPattern) {
+    // Count braces to see if there's enough structure
+    const openBraces = (text.match(/[{[]/g) || []).length;
+    const closeBraces = (text.match(/[}\]]/g) || []).length;
+    return openBraces >= 2 && closeBraces >= 2;
+  }
+
+  return false;
+}
+
+/**
+ * Extract suspicious numeric IDs from JSON content
+ * Flags strings with 8+ numbers that contain dashes, hyphens, or periods
+ * Does not flag numbers with $ prefix (currency)
+ */
+function detectSuspiciousIdsInJson(text: string): DetectionResult[] {
+  if (!isJsonContent(text)) {
+    return [];
+  }
+
+  const results: DetectionResult[] = [];
+
+  // Pattern to match suspicious IDs:
+  // - Must have at least 8 digits total
+  // - Can contain dashes, hyphens, or periods between/around digits
+  // - Must NOT be preceded by $ (currency)
+  // - Liberal matching for various ID formats
+
+  // Regex breakdown:
+  // (?<!\$)              - Negative lookbehind: not preceded by $
+  // (?<!\w)              - Not preceded by word character (ensures word boundary)
+  // (\d+[-.\s]*){2,}     - Two or more groups of digits separated by dash/period/space
+  // \d+                  - Ending with digits
+  // (?!\w)               - Not followed by word character
+
+  const suspiciousIdPattern =
+    /(?<!\$)(?<!\w)(\d+[-.\s]+\d+(?:[-.\s]+\d+)*?)(?!\w)/g;
+
+  const matches = text.matchAll(suspiciousIdPattern);
+
+  for (const match of matches) {
+    const value = match[0].trim();
+    const start = match.index;
+
+    // Count total number of digits in the match
+    const digitCount = (value.match(/\d/g) || []).length;
+
+    // Only flag if it has 8 or more digits
+    if (digitCount >= 8) {
+      // Check if this looks like a known pattern first
+      const alreadyDetectedType = detectPiiType(value);
+
+      // Skip if it's already detected as a known PII type
+      if (!alreadyDetectedType) {
+        results.push({
+          type: 'SUSPICIOUS_ID',
+          value,
+          start,
+          end: start !== undefined ? start + value.length : undefined,
+          confidence: 0.7,
+        });
+      }
+    }
+  }
+
+  // Also detect pure numeric strings of 8+ digits in JSON values
+  // Pattern: look for long numeric strings in quotes (JSON string values)
+  const jsonValuePattern = /["'](\d{8,})["']/g;
+  const valueMatches = text.matchAll(jsonValuePattern);
+
+  for (const match of valueMatches) {
+    const value = match[1]; // The captured numeric string
+    const start = match.index !== undefined ? match.index + 1 : undefined; // +1 to skip opening quote
+
+    // Check if already detected
+    const alreadyDetected = results.some(
+      r => r.value === value && r.start === start
+    );
+
+    if (!alreadyDetected) {
+      // Check if it's a known PII type
+      const knownType = detectPiiType(value);
+
+      if (!knownType) {
+        results.push({
+          type: 'SUSPICIOUS_ID',
+          value,
+          start,
+          end: start !== undefined ? start + value.length : undefined,
+          confidence: 0.7,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
 // Main detection function
 export function detectPii(text: string): DetectionResult[] {
   if (!text || text.length === 0) return [];
@@ -247,6 +371,22 @@ export function detectPii(text: string): DetectionResult[] {
       };
 
       builtInResults.push(detection);
+      results.push(detection);
+    }
+  }
+
+  // Check for suspicious IDs in JSON content
+  const jsonSuspiciousIds = detectSuspiciousIdsInJson(text);
+  for (const detection of jsonSuspiciousIds) {
+    // Check if not already detected by built-in patterns
+    const alreadyDetected = builtInResults.some(
+      builtIn =>
+        builtIn.value === detection.value &&
+        builtIn.start === detection.start &&
+        builtIn.end === detection.end
+    );
+
+    if (!alreadyDetected) {
       results.push(detection);
     }
   }
