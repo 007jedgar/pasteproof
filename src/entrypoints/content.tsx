@@ -1475,6 +1475,7 @@ export default defineContentScript({
       removeBadge();
       removeDot();
       isPopupOpen = false;
+      isAiScanning = false;
     };
 
     const getInputValue = (

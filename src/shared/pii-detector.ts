@@ -282,7 +282,7 @@ function detectSuspiciousIdsInJson(text: string): DetectionResult[] {
   // (?!\w)               - Not followed by word character
 
   const suspiciousIdPattern =
-    /(?<!\$)(?<!\w)(\d+[-.\s]+\d+(?:[-.\s]+\d+)*?)(?!\w)/g;
+    /(?<!\$)(?<!\w)(\d+[-.\s]+\d+(?:[-.\s]+\d+)*)(?!\w)/g;
 
   const matches = text.matchAll(suspiciousIdPattern);
 
