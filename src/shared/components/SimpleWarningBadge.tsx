@@ -13,6 +13,7 @@ export function SimpleWarningBadge({
   variant = 'full',
   alwaysShowDot = false,
   autoAiEnabled = false,
+  isAiScanning = false,
 }: {
   detections: DetectionResult[];
   onAnonymize: (detections: DetectionResult[]) => void;
@@ -22,12 +23,14 @@ export function SimpleWarningBadge({
   variant?: 'full' | 'dot';
   alwaysShowDot?: boolean;
   autoAiEnabled?: boolean;
+  isAiScanning?: boolean;
 }) {
   const [showPopup, setShowPopup] = useState(false);
   const [aiDetections, setAiDetections] = useState<AiDetection[] | null>(
     initialAiDetections || null
   );
-  const [aiScanning, setAiScanning] = useState(false);
+  const [manualAiScanning, setManualAiScanning] = useState(false);
+  const aiScanning = manualAiScanning || isAiScanning;
   const [aiError, setAiError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'regex' | 'ai'>(
     initialAiDetections && initialAiDetections.length > 0 ? 'ai' : 'regex'
@@ -138,7 +141,7 @@ export function SimpleWarningBadge({
     e.preventDefault();
     e.stopPropagation();
 
-    setAiScanning(true);
+    setManualAiScanning(true);
     setAiError(null);
     setActiveTab('ai');
 
@@ -173,7 +176,7 @@ export function SimpleWarningBadge({
         setAiError(`AI scan failed: ${error.message}`);
       }
     } finally {
-      setAiScanning(false);
+      setManualAiScanning(false);
     }
   };
 
