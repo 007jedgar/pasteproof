@@ -258,6 +258,7 @@ export default defineContentScript({
     let contextMenuInput: HTMLInputElement | HTMLTextAreaElement | null = null;
     let isAnonymizing = false; // Flag to prevent input handlers from interfering during anonymization
     let keepPopupOpenAfterAnonymize = false; // Flag to keep popup open during single item anonymization
+    let isAiScanning = false; // Flag to track when AI scan is in progress
 
     // Initialize team policies on page load
     async function initializeWithTeamPolicies() {
@@ -1021,13 +1022,25 @@ export default defineContentScript({
         return null;
       }
 
+      isAiScanning = true;
+      // Re-render badge to show scanning state
+      if (activeInput) {
+        const expectedTypes = getExpectedInputType(activeInput);
+        const results = detectPii(getInputValue(activeInput));
+        const filteredResults = filterExpectedDetections(results, expectedTypes);
+        const existingAi = (activeInput as any).__pasteproofAiDetections || null;
+        handleDetection(filteredResults, existingAi);
+      }
+
       if (isAlreadyRedacted(text) && !hasMinimalContent(text)) {
+        isAiScanning = false;
         return null;
       }
 
       // Check cache first using the optimizer
       const cachedResult = aiScanOptimizer.getCachedResult(text);
       if (cachedResult !== null) {
+        isAiScanning = false;
         return cachedResult;
       }
 
@@ -1071,6 +1084,7 @@ export default defineContentScript({
         });
 
         // Return all unique local detections formatted for AI detection format
+        isAiScanning = false;
         return uniqueLocalDetections.map(d => ({
           type: d.type,
           value: d.value,
@@ -1086,6 +1100,7 @@ export default defineContentScript({
       try {
         const apiClient = getApiClient();
         if (!apiClient) {
+          isAiScanning = false;
           return null;
         }
 
@@ -1173,10 +1188,11 @@ export default defineContentScript({
         // Track AI scan completion
         await completeAiScan(filteredDetections.length);
 
+        isAiScanning = false;
         return filteredDetections;
       } catch (error: any) {
         console.error('AI scan error:', error);
-        
+
         // Track AI scan failure
         await failAiScan(error.message || 'Unknown error');
         if (
@@ -1184,6 +1200,7 @@ export default defineContentScript({
           error.message?.includes('Rate limit exceeded')
         ) {
         }
+        isAiScanning = false;
         return null;
       }
     };
@@ -1368,6 +1385,7 @@ export default defineContentScript({
               initialAiDetections={aiDetections || undefined}
               variant="full"
               autoAiEnabled={autoAiScan}
+              isAiScanning={isAiScanning}
             />
           );
         } else if (badgeRoot) {
@@ -1382,6 +1400,7 @@ export default defineContentScript({
               initialAiDetections={aiDetections || undefined}
               variant="full"
               autoAiEnabled={autoAiScan}
+              isAiScanning={isAiScanning}
             />
           );
         }
@@ -1407,6 +1426,7 @@ export default defineContentScript({
               variant="dot"
               alwaysShowDot={true}
               autoAiEnabled={autoAiScan}
+              isAiScanning={isAiScanning}
             />
           );
         } else if (dotRoot) {
@@ -1422,6 +1442,7 @@ export default defineContentScript({
               variant="dot"
               alwaysShowDot={true}
               autoAiEnabled={autoAiScan}
+              isAiScanning={isAiScanning}
             />
           );
         }
@@ -1765,6 +1786,7 @@ export default defineContentScript({
               }}
               variant="full"
               autoAiEnabled={autoAiScan}
+              isAiScanning={isAiScanning}
             />
           );
         }

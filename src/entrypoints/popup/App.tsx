@@ -2,12 +2,10 @@
 import { useState, useEffect } from 'react';
 import pasteproofIcon from '@/assets/icons/pasteproof-48.png';
 import {
-  getApiClient,
   initializeApiClient,
   getApiBaseUrl,
   type Team,
 } from '@/shared/api-client';
-import { getAiScanState, type AiScanState } from '@/shared/ai-scan-state';
 import LockIcon from '@mui/icons-material/Lock';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -17,8 +15,6 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SecurityIcon from '@mui/icons-material/Security';
-import CircularProgress from '@mui/icons-material/HourglassEmpty';
-import ErrorIcon from '@mui/icons-material/Error';
 
 type User = {
   id: string;
@@ -48,30 +44,11 @@ export default function PopupApp() {
   const [loading, setLoading] = useState(true);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [activeTab, setActiveTab] = useState<'status' | 'ai-scan'>('status');
-  const [aiScanState, setAiScanState] = useState<AiScanState>({
-    status: 'idle',
-    detectionCount: 0,
-  });
 
   useEffect(() => {
     loadState();
     loadUserTeams();
-    loadAiScanState();
-
-    // Poll for AI scan state updates every second
-    const interval = setInterval(loadAiScanState, 1000);
-    return () => clearInterval(interval);
   }, []);
-
-  const loadAiScanState = async () => {
-    try {
-      const scanState = await getAiScanState();
-      setAiScanState(scanState);
-    } catch (error) {
-      console.error('Failed to load AI scan state:', error);
-    }
-  };
 
   const loadUserTeams = async () => {
     try {
@@ -402,37 +379,7 @@ export default function PopupApp() {
 
       {state.isAuthenticated && (
         <>
-          {/* Tab Navigation */}
-          <div style={styles.tabs}>
-            <button
-              onClick={() => setActiveTab('status')}
-              style={{
-                ...styles.tab,
-                ...(activeTab === 'status' ? styles.tabActive : {}),
-              }}
-            >
-              <SecurityIcon sx={{ fontSize: 14, marginRight: '4px' }} />
-              Status
-            </button>
-            <button
-              onClick={() => setActiveTab('ai-scan')}
-              style={{
-                ...styles.tab,
-                ...(activeTab === 'ai-scan' ? styles.tabActive : {}),
-              }}
-            >
-              <SmartToyIcon sx={{ fontSize: 14, marginRight: '4px' }} />
-              AI Scan
-              {aiScanState.status === 'scanning' && (
-                <span style={styles.scanningIndicator}>●</span>
-              )}
-            </button>
-          </div>
-
-          {/* Status Tab */}
-          {activeTab === 'status' && (
-            <>
-              <div
+          <div
                 style={{
                   ...styles.statusBadge,
                   backgroundColor: state.enabled ? '#ecfdf5' : '#fef2f2',
@@ -711,190 +658,6 @@ export default function PopupApp() {
                   Sign Out
                 </button>
               </div>
-            </>
-          )}
-
-          {/* AI Scan Tab */}
-          {activeTab === 'ai-scan' && (
-            <div style={styles.aiScanContainer}>
-              {aiScanState.status === 'scanning' && (
-                <div style={styles.aiScanStatus}>
-                  <div style={styles.aiScanIcon}>
-                    <CircularProgress
-                      sx={{
-                        fontSize: 40,
-                        color: '#9c27b0',
-                        animation: 'pulse 1.5s ease-in-out infinite',
-                      }}
-                    />
-                  </div>
-                  <div style={styles.aiScanTitle}>Scanning for PII...</div>
-                  <div style={styles.aiScanDescription}>
-                    Our AI is analyzing your input for sensitive information
-                  </div>
-                  {aiScanState.textPreview && (
-                    <div style={styles.aiScanPreview}>
-                      <div
-                        style={{
-                          fontSize: '10px',
-                          color: '#9ca3af',
-                          marginBottom: '4px',
-                        }}
-                      >
-                        Text Preview:
-                      </div>
-                      <div style={styles.previewText}>
-                        {aiScanState.textPreview}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {aiScanState.status === 'success' && (
-                <div style={styles.aiScanStatus}>
-                  <div style={styles.aiScanIcon}>
-                    <CheckCircleIcon sx={{ fontSize: 40, color: '#10b981' }} />
-                  </div>
-                  <div style={styles.aiScanTitle}>Scan Complete</div>
-                  <div style={styles.aiScanDescription}>
-                    {aiScanState.detectionCount === 0
-                      ? 'No PII detected by AI'
-                      : `Found ${aiScanState.detectionCount} potential ${
-                          aiScanState.detectionCount === 1 ? 'issue' : 'issues'
-                        }`}
-                  </div>
-                  {aiScanState.lastScanTime && (
-                    <div
-                      style={{
-                        fontSize: '11px',
-                        color: '#9ca3af',
-                        marginTop: '8px',
-                      }}
-                    >
-                      Last scan:{' '}
-                      {new Date(aiScanState.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {aiScanState.status === 'error' && (
-                <div style={styles.aiScanStatus}>
-                  <div style={styles.aiScanIcon}>
-                    <ErrorIcon sx={{ fontSize: 40, color: '#ef4444' }} />
-                  </div>
-                  <div style={styles.aiScanTitle}>Scan Failed</div>
-                  <div style={styles.aiScanDescription}>
-                    {aiScanState.error || 'An error occurred during the scan'}
-                  </div>
-                  {aiScanState.lastScanTime && (
-                    <div
-                      style={{
-                        fontSize: '11px',
-                        color: '#9ca3af',
-                        marginTop: '8px',
-                      }}
-                    >
-                      Failed at:{' '}
-                      {new Date(aiScanState.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {aiScanState.status === 'idle' && (
-                <div style={styles.aiScanStatus}>
-                  <div style={styles.aiScanIcon}>
-                    <SmartToyIcon sx={{ fontSize: 40, color: '#9c27b0' }} />
-                  </div>
-                  <div style={styles.aiScanTitle}>AI Scan Inactive</div>
-                  <div style={styles.aiScanDescription}>
-                    {state.autoAiScan
-                      ? 'Start typing in an input field to trigger an AI scan'
-                      : 'Enable Auto AI Scan below to automatically detect PII'}
-                  </div>
-                </div>
-              )}
-
-              {/* Auto AI Scan Toggle - Always show in AI tab */}
-              <div style={{ ...styles.divider, marginTop: '16px' }} />
-              <div style={styles.section}>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        marginBottom: '3px',
-                      }}
-                    >
-                      <SmartToyIcon
-                        sx={{
-                          fontSize: 14,
-                          color: '#9c27b0',
-                          marginRight: '3px',
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          color: '#333',
-                        }}
-                      >
-                        Auto AI Scan
-                      </span>
-                      <span
-                        style={{
-                          fontSize: '8px',
-                          backgroundColor: '#9c27b0',
-                          color: 'white',
-                          padding: '1px 4px',
-                          borderRadius: '3px',
-                          fontWeight: '600',
-                        }}
-                      >
-                        PREMIUM
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '10px', color: '#666' }}>
-                      Automatically scan inputs with AI
-                    </div>
-                  </div>
-
-                  <label style={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={state.autoAiScan}
-                      onChange={toggleAutoAiScan}
-                      style={{ opacity: 0, width: 0, height: 0 }}
-                    />
-                    <span
-                      style={{
-                        ...styles.toggleSlider,
-                        backgroundColor: state.autoAiScan ? '#9c27b0' : '#ccc',
-                      }}
-                    >
-                      <span
-                        style={{
-                          ...styles.toggleButton,
-                          left: state.autoAiScan ? '22px' : '2px',
-                        }}
-                      />
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -1098,84 +861,5 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: '12px',
     fontSize: '13px',
     lineHeight: '1.4',
-  },
-  tabs: {
-    display: 'flex',
-    gap: '6px',
-    marginBottom: '12px',
-    borderBottom: '1px solid #e5e7eb',
-    paddingBottom: '0px',
-  },
-  tab: {
-    flex: 1,
-    padding: '8px 12px',
-    border: 'none',
-    borderBottom: '2px solid transparent',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: '500',
-    color: '#6b7280',
-    transition: 'all 0.2s ease',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  tabActive: {
-    color: '#ff9800',
-    borderBottom: '2px solid #ff9800',
-    fontWeight: '600',
-  },
-  scanningIndicator: {
-    marginLeft: '6px',
-    color: '#9c27b0',
-    fontSize: '16px',
-    animation: 'pulse 1.5s ease-in-out infinite',
-  },
-  aiScanContainer: {
-    marginBottom: '12px',
-  },
-  aiScanStatus: {
-    padding: '20px',
-    textAlign: 'center',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    minHeight: '180px',
-    justifyContent: 'center',
-  },
-  aiScanIcon: {
-    marginBottom: '12px',
-    display: 'flex',
-    justifyContent: 'center',
-  },
-  aiScanTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: '6px',
-  },
-  aiScanDescription: {
-    fontSize: '13px',
-    color: '#6b7280',
-    lineHeight: '1.5',
-    maxWidth: '280px',
-  },
-  aiScanPreview: {
-    marginTop: '12px',
-    padding: '8px 12px',
-    backgroundColor: '#f9fafb',
-    borderRadius: '6px',
-    border: '1px solid #e5e7eb',
-    maxWidth: '280px',
-  },
-  previewText: {
-    fontSize: '11px',
-    color: '#374151',
-    fontFamily: 'monospace',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
   },
 };
