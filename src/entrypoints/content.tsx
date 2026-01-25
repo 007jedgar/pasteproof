@@ -85,7 +85,7 @@ export default defineContentScript({
   async main(ctx) {
     let authToken = await storage.getItem<string>('local:authToken');
     const enabled = (await storage.getItem<boolean>('local:enabled')) ?? true;
-    const autoAiScan =
+    let autoAiScan =
       (await storage.getItem<boolean>('local:autoAiScan')) ?? false;
     if (!enabled) {
       return;
@@ -259,6 +259,12 @@ export default defineContentScript({
     let isAnonymizing = false; // Flag to prevent input handlers from interfering during anonymization
     let keepPopupOpenAfterAnonymize = false; // Flag to keep popup open during single item anonymization
     let isAiScanning = false; // Flag to track when AI scan is in progress
+
+    // Handler to enable auto AI scan globally
+    const handleEnableAutoAiScan = async () => {
+      await storage.setItem('local:autoAiScan', true);
+      autoAiScan = true;
+    };
 
     // Initialize team policies on page load
     async function initializeWithTeamPolicies() {
@@ -1386,6 +1392,7 @@ export default defineContentScript({
               variant="full"
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
+              onEnableAutoAiScan={handleEnableAutoAiScan}
             />
           );
         } else if (badgeRoot) {
@@ -1401,6 +1408,7 @@ export default defineContentScript({
               variant="full"
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
+              onEnableAutoAiScan={handleEnableAutoAiScan}
             />
           );
         }
@@ -1427,6 +1435,7 @@ export default defineContentScript({
               alwaysShowDot={true}
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
+              onEnableAutoAiScan={handleEnableAutoAiScan}
             />
           );
         } else if (dotRoot) {
@@ -1443,6 +1452,7 @@ export default defineContentScript({
               alwaysShowDot={true}
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
+              onEnableAutoAiScan={handleEnableAutoAiScan}
             />
           );
         }
@@ -1788,6 +1798,7 @@ export default defineContentScript({
               variant="full"
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
+              onEnableAutoAiScan={handleEnableAutoAiScan}
             />
           );
         }
@@ -1886,6 +1897,7 @@ export default defineContentScript({
           initializeWithTeamPolicies();
         }
         if (changes.autoAiScan) {
+          autoAiScan = changes.autoAiScan.newValue ?? false;
         }
       }
     });

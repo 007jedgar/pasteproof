@@ -285,17 +285,30 @@ export default function PopupApp() {
           },
         });
         const data = await response.json();
+        // Normalize domain for comparison (backend stores without www prefix)
+        const normalizedDomain = state.currentDomain
+          .replace(/^www\./, '')
+          .toLowerCase();
         const entry = data.whitelist.find(
-          (w: any) => w.domain === state.currentDomain
+          (w: any) => w.domain === normalizedDomain
         );
 
         if (entry) {
-          await fetch(`${baseUrl}/v1/whitelist/${entry.id}`, {
-            method: 'DELETE',
-            headers: {
-              'X-API-Key': authToken as string,
-            },
-          });
+          const deleteResponse = await fetch(
+            `${baseUrl}/v1/whitelist/${entry.id}`,
+            {
+              method: 'DELETE',
+              headers: {
+                'X-API-Key': authToken as string,
+              },
+            }
+          );
+          if (!deleteResponse.ok) {
+            const errorData = await deleteResponse.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to remove from whitelist');
+          }
+        } else {
+          console.warn('Whitelist entry not found for domain:', normalizedDomain);
         }
       } else {
         await fetch(`${baseUrl}/v1/whitelist`, {
