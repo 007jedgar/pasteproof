@@ -14,6 +14,7 @@ export function SimpleWarningBadge({
   alwaysShowDot = false,
   autoAiEnabled = false,
   isAiScanning = false,
+  onEnableAutoAiScan,
 }: {
   detections: DetectionResult[];
   onAnonymize: (detections: DetectionResult[]) => void;
@@ -24,6 +25,7 @@ export function SimpleWarningBadge({
   alwaysShowDot?: boolean;
   autoAiEnabled?: boolean;
   isAiScanning?: boolean;
+  onEnableAutoAiScan?: () => Promise<void>;
 }) {
   const [showPopup, setShowPopup] = useState(false);
   const [aiDetections, setAiDetections] = useState<AiDetection[] | null>(
@@ -384,12 +386,28 @@ export function SimpleWarningBadge({
                   fontWeight: activeTab === 'ai' ? '600' : '400',
                   cursor: 'pointer',
                   fontSize: '13px',
+                  position: 'relative',
                 }}
               >
                 🤖 AI Scan{' '}
                 {aiDetections &&
                   aiDetections.length > 0 &&
                   `(${aiDetections.length})`}
+                {!autoAiEnabled && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '4px',
+                      right: '4px',
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: '#2196f3',
+                      border: '1px solid white',
+                    }}
+                    title="Auto AI Scan is disabled"
+                  />
+                )}
               </button>
             </div>
 
@@ -515,32 +533,102 @@ export function SimpleWarningBadge({
                         Use AI to detect sensitive information that patterns
                         might miss
                       </p>
-                      <button
-                        type="button"
-                        onClick={handleAiScan}
-                        style={{
-                          backgroundColor: '#9c27b0',
-                          color: 'white',
-                          border: 'none',
-                          padding: '10px 20px',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          fontWeight: '600',
-                        }}
-                        onMouseEnter={e => {
-                          (
-                            e.target as HTMLButtonElement
-                          ).style.backgroundColor = '#7b1fa2';
-                        }}
-                        onMouseLeave={e => {
-                          (
-                            e.target as HTMLButtonElement
-                          ).style.backgroundColor = '#9c27b0';
-                        }}
-                      >
-                        Run AI Scan
-                      </button>
+                      {!autoAiEnabled && (
+                        <div
+                          style={{
+                            backgroundColor: '#e3f2fd',
+                            border: '1px solid #2196f3',
+                            borderRadius: '6px',
+                            padding: '10px 12px',
+                            marginBottom: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                          }}
+                        >
+                          <span
+                            style={{
+                              backgroundColor: '#2196f3',
+                              color: 'white',
+                              borderRadius: '50%',
+                              width: '18px',
+                              height: '18px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              flexShrink: 0,
+                            }}
+                          >
+                            i
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#1565c0', textAlign: 'left' }}>
+                            Auto AI Scan is disabled. Enable it for automatic scanning or run a one-time scan.
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
+                        {!autoAiEnabled && onEnableAutoAiScan && (
+                          <button
+                            type="button"
+                            onClick={async e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              await onEnableAutoAiScan();
+                              handleAiScan(e);
+                            }}
+                            style={{
+                              backgroundColor: '#2196f3',
+                              color: 'white',
+                              border: 'none',
+                              padding: '10px 20px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                            }}
+                            onMouseEnter={e => {
+                              (
+                                e.target as HTMLButtonElement
+                              ).style.backgroundColor = '#1976d2';
+                            }}
+                            onMouseLeave={e => {
+                              (
+                                e.target as HTMLButtonElement
+                              ).style.backgroundColor = '#2196f3';
+                            }}
+                          >
+                            Enable AI Scan
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleAiScan}
+                          style={{
+                            backgroundColor: '#9c27b0',
+                            color: 'white',
+                            border: 'none',
+                            padding: '10px 20px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                          }}
+                          onMouseEnter={e => {
+                            (
+                              e.target as HTMLButtonElement
+                            ).style.backgroundColor = '#7b1fa2';
+                          }}
+                          onMouseLeave={e => {
+                            (
+                              e.target as HTMLButtonElement
+                            ).style.backgroundColor = '#9c27b0';
+                          }}
+                        >
+                          Run AI Scan
+                        </button>
+                      </div>
                       <p
                         style={{
                           fontSize: '11px',
@@ -550,7 +638,7 @@ export function SimpleWarningBadge({
                       >
                         {autoAiEnabled
                           ? 'Premium feature - deeper analysis'
-                          : 'Auto AI scan is off. Tap “Run AI Scan”.'}
+                          : 'Run once or enable for automatic scanning'}
                       </p>
                     </div>
                   )}
