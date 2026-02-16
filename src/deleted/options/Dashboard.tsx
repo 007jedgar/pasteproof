@@ -23,8 +23,6 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [timeRange, setTimeRange] = useState(7);
   const [eventFilter, setEventFilter] = useState<string>('all');
-  const [error, setError] = useState("");
-  const [timeRange, setTimeRange] = useState<"7d" | "30d">("30d");
 
   useEffect(() => {
     loadAnalytics();

@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react';
 import pasteproofIcon from '@/assets/icons/pasteproof-48.png';
 import {
   initializeApiClient,
+  getApiClient,
   getApiBaseUrl,
+  apiCache,
   type Team,
 } from '@/shared/api-client';
 import LockIcon from '@mui/icons-material/Lock';
@@ -15,6 +17,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SecurityIcon from '@mui/icons-material/Security';
+import WifiIcon from '@mui/icons-material/Wifi';
 
 type User = {
   id: string;
@@ -30,6 +33,8 @@ type PopupState = {
   isWhitelisted: boolean;
   hasApiKey: boolean;
   user?: User;
+  tokenValid?: boolean;
+  tokenError?: string;
 };
 
 export default function PopupApp() {
@@ -40,6 +45,8 @@ export default function PopupApp() {
     currentDomain: '',
     isWhitelisted: false,
     hasApiKey: false,
+    tokenValid: undefined,
+    tokenError: undefined,
   });
   const [loading, setLoading] = useState(true);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
@@ -49,6 +56,42 @@ export default function PopupApp() {
     loadState();
     loadUserTeams();
   }, []);
+
+  // Auto-validate token when popup opens (for authenticated users)
+  useEffect(() => {
+    if (state.isAuthenticated && state.tokenValid === undefined) {
+      // Auto-validate token in the background
+      autoValidateToken();
+    }
+  }, [state.isAuthenticated]);
+
+  const autoValidateToken = async () => {
+    try {
+      const authToken = await storage.getItem<string>('local:authToken');
+      if (!authToken) return;
+
+      const apiClient = initializeApiClient(authToken);
+      const result = await apiClient.validateToken();
+
+      setState(prev => ({
+        ...prev,
+        tokenValid: result.valid,
+        tokenError: result.error,
+      }));
+
+      // If token is invalid, show a warning banner
+      if (!result.valid) {
+        console.warn('Auto-validation failed:', result.error);
+      }
+    } catch (error) {
+      console.error('Auto-validation error:', error);
+      setState(prev => ({
+        ...prev,
+        tokenValid: false,
+        tokenError: error instanceof Error ? error.message : 'Unknown error',
+      }));
+    }
+  };
 
   const loadUserTeams = async () => {
     try {
@@ -108,9 +151,6 @@ export default function PopupApp() {
       const user = await storage.getItem<any>('local:user');
 
       let isAuthenticated = !!(authToken && user);
-      const isPremiumUser =
-        user?.subscription_tier === 'premium' ||
-        user?.subscription_status === 'active';
 
       let autoAiScan = storedAutoAiScan ?? false;
 
@@ -157,17 +197,10 @@ export default function PopupApp() {
       let isWhitelisted = false;
       if (isAuthenticated) {
         try {
-          const baseUrl = getApiBaseUrl();
-          const response = await fetch(`${baseUrl}/v1/whitelist/check`, {
-            method: 'POST',
-            headers: {
-              'X-API-Key': authToken,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ domain }),
-          });
-          const data = await response.json();
-          isWhitelisted = data.whitelisted;
+          const apiClient = getApiClient();
+          if (apiClient) {
+            isWhitelisted = await apiClient.isWhitelisted(domain);
+          }
         } catch (error) {
           console.error('Failed to check whitelist:', error);
         }
@@ -278,6 +311,11 @@ export default function PopupApp() {
       const authToken = await storage.getItem<string>('local:authToken');
       const baseUrl = getApiBaseUrl();
 
+      // Normalize domain for cache invalidation
+      const normalizedDomain = state.currentDomain
+        .replace(/^www\./, '')
+        .toLowerCase();
+
       if (state.isWhitelisted) {
         const response = await fetch(`${baseUrl}/v1/whitelist`, {
           headers: {
@@ -285,10 +323,6 @@ export default function PopupApp() {
           },
         });
         const data = await response.json();
-        // Normalize domain for comparison (backend stores without www prefix)
-        const normalizedDomain = state.currentDomain
-          .replace(/^www\./, '')
-          .toLowerCase();
         const entry = data.whitelist.find(
           (w: any) => w.domain === normalizedDomain
         );
@@ -321,6 +355,10 @@ export default function PopupApp() {
         });
       }
 
+      // Invalidate cache for both the original domain and normalized domain
+      await apiCache.invalidateWhitelistCheck(state.currentDomain);
+      await apiCache.invalidateWhitelistCheck(normalizedDomain);
+
       setState({ ...state, isWhitelisted: !state.isWhitelisted });
 
       // Refresh the page after toggling whitelist
@@ -333,6 +371,93 @@ export default function PopupApp() {
 
   const openDashboard = () => {
     browser.tabs.create({ url: `${import.meta.env.VITE_WEB_URL}/dashboard` });
+  };
+
+  const testConnection = async () => {
+    try {
+      setState(prev => ({ ...prev, tokenValid: undefined, tokenError: undefined }));
+      
+      const authToken = await storage.getItem<string>('local:authToken');
+      if (!authToken) {
+        setState(prev => ({
+          ...prev,
+          tokenValid: false,
+          tokenError: 'No authentication token found',
+        }));
+        return;
+      }
+
+      const apiClient = initializeApiClient(authToken);
+      const result = await apiClient.validateToken();
+
+      setState(prev => ({
+        ...prev,
+        tokenValid: result.valid,
+        tokenError: result.error,
+        user: result.user || prev.user,
+      }));
+
+      if (result.valid) {
+        alert('✓ Connection successful! Your authentication token is valid.');
+      } else {
+        // Prompt for re-authentication
+        const shouldReauth = confirm(
+          `✗ Connection failed: ${result.error || 'Unknown error'}\n\n` +
+          'Your authentication token is invalid or expired.\n\n' +
+          'Would you like to sign in again now?'
+        );
+        
+        if (shouldReauth) {
+          await promptReAuthentication();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to test connection:', error);
+      setState(prev => ({
+        ...prev,
+        tokenValid: false,
+        tokenError: error instanceof Error ? error.message : 'Unknown error',
+      }));
+      
+      const shouldReauth = confirm(
+        `✗ Connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
+        'Would you like to sign in again now?'
+      );
+      
+      if (shouldReauth) {
+        await promptReAuthentication();
+      }
+    }
+  };
+
+  const promptReAuthentication = async () => {
+    try {
+      // Clear existing auth data
+      await storage.removeItem('local:authToken');
+      await storage.removeItem('local:user');
+      await storage.removeItem('local:currentTeamId');
+      localStorage.removeItem('currentTeamId');
+
+      // Clear API cache
+      await apiCache.clearAll();
+
+      // Open sign-in page
+      const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
+      await browser.tabs.create({
+        url: authUrl,
+        active: true,
+      });
+
+      alert(
+        'Please sign in on the opened tab.\n\n' +
+        'After signing in, reopen this popup to verify your connection.'
+      );
+      
+      window.close();
+    } catch (error) {
+      console.error('Failed to prompt re-authentication:', error);
+      alert('Failed to open sign-in page. Please try again.');
+    }
   };
 
   if (loading) {
@@ -392,6 +517,43 @@ export default function PopupApp() {
 
       {state.isAuthenticated && (
         <>
+          {/* Invalid Token Warning Banner */}
+          {state.tokenValid === false && (
+            <div style={styles.warningBanner}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <LockIcon sx={{ fontSize: 18, color: '#ef4444' }} />
+                <span style={{ fontWeight: '600', fontSize: '13px', color: '#991b1b' }}>
+                  Authentication Issue Detected
+                </span>
+              </div>
+              <div style={{ fontSize: '11px', color: '#7f1d1d', marginBottom: '8px', lineHeight: '1.4' }}>
+                Your authentication token is invalid or expired. Some features may not work.
+              </div>
+              <button
+                onClick={promptReAuthentication}
+                style={{
+                  ...styles.button,
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  fontSize: '12px',
+                  padding: '6px 12px',
+                  width: '100%',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = '#dc2626';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = '#ef4444';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <LockIcon sx={{ fontSize: 12, marginRight: '4px' }} />
+                Sign In Again
+              </button>
+            </div>
+          )}
+
           <div
                 style={{
                   ...styles.statusBadge,
@@ -671,6 +833,74 @@ export default function PopupApp() {
                   Sign Out
                 </button>
               </div>
+
+              {/* Test Connection Button */}
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  onClick={testConnection}
+                  style={{
+                    ...styles.link,
+                    width: '100%',
+                    backgroundColor: state.tokenValid === true ? '#ecfdf5' : state.tokenValid === false ? '#fef2f2' : 'white',
+                    borderColor: state.tokenValid === true ? '#10b981' : state.tokenValid === false ? '#ef4444' : '#e5e7eb',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.backgroundColor = state.tokenValid === true ? '#d1fae5' : state.tokenValid === false ? '#fee2e2' : '#f9fafb';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.backgroundColor = state.tokenValid === true ? '#ecfdf5' : state.tokenValid === false ? '#fef2f2' : 'white';
+                  }}
+                >
+                  <WifiIcon sx={{ 
+                    fontSize: 14, 
+                    marginRight: '5px',
+                    color: state.tokenValid === true ? '#10b981' : state.tokenValid === false ? '#ef4444' : '#6b7280'
+                  }} />
+                  <span style={{
+                    color: state.tokenValid === true ? '#065f46' : state.tokenValid === false ? '#991b1b' : '#374151'
+                  }}>
+                    {state.tokenValid === true ? 'Connection OK' : state.tokenValid === false ? 'Connection Failed' : 'Test Connection'}
+                  </span>
+                </button>
+                {state.tokenError && (
+                  <div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#ef4444',
+                      marginTop: '4px',
+                      padding: '4px 8px',
+                      backgroundColor: '#fef2f2',
+                      borderRadius: '4px',
+                      border: '1px solid #fee2e2',
+                      marginBottom: '6px',
+                    }}>
+                      {state.tokenError}
+                    </div>
+                    <button
+                      onClick={promptReAuthentication}
+                      style={{
+                        ...styles.button,
+                        backgroundColor: '#ef4444',
+                        color: 'white',
+                        fontSize: '12px',
+                        padding: '6px 12px',
+                        width: '100%',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = '#dc2626';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = '#ef4444';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }}
+                    >
+                      <LockIcon sx={{ fontSize: 12, marginRight: '4px' }} />
+                      Sign In Again
+                    </button>
+                  </div>
+                )}
+              </div>
         </>
       )}
     </div>
@@ -874,5 +1104,13 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: '12px',
     fontSize: '13px',
     lineHeight: '1.4',
+  },
+  warningBanner: {
+    backgroundColor: '#fef2f2',
+    border: '1px solid #fee2e2',
+    borderRadius: '8px',
+    padding: '12px',
+    marginBottom: '12px',
+    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
   },
 };
