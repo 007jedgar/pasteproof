@@ -68,6 +68,10 @@ class DetectionQueue {
 
 const detectionQueue = new DetectionQueue();
 
+// Per-tab ignore lists for session-scoped PII ignore
+// Key: tab ID, Value: Set of ignored detection values (raw strings)
+const tabIgnoreLists = new Map<number, Set<string>>();
+
 // Export for use in content scripts
 export function queueDetection(detection: Omit<QueuedDetection, 'timestamp'>) {
   detectionQueue.add(detection);
@@ -148,6 +152,39 @@ export default defineBackground(() => {
   // Recreate context menu on startup (for Firefox compatibility)
   browser.runtime.onStartup.addListener(() => {
     createContextMenu();
+  });
+
+  // Clean up ignore list when a tab is closed
+  browser.tabs.onRemoved.addListener((tabId) => {
+    tabIgnoreLists.delete(tabId);
+  });
+
+  // Handle ignore list messages from content scripts
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const tabId = sender.tab?.id;
+    if (!tabId) return;
+
+    if (message.action === 'addIgnoredValue') {
+      const value = message.value;
+      if (typeof value !== 'string' || value.length === 0) return;
+
+      if (!tabIgnoreLists.has(tabId)) {
+        tabIgnoreLists.set(tabId, new Set());
+      }
+      tabIgnoreLists.get(tabId)!.add(value);
+      return;
+    }
+
+    if (message.action === 'getIgnoredValues') {
+      const values = tabIgnoreLists.get(tabId);
+      sendResponse(values ? [...values] : []);
+      return true; // indicates async response
+    }
+
+    if (message.action === 'clearIgnoredValues') {
+      tabIgnoreLists.delete(tabId);
+      return;
+    }
   });
 
   // Handle context menu clicks

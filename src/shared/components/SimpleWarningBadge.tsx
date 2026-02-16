@@ -15,6 +15,10 @@ export function SimpleWarningBadge({
   autoAiEnabled = false,
   isAiScanning = false,
   onEnableAutoAiScan,
+  onIgnoreDetection,
+  onDismissBadge,
+  isDismissed = false,
+  ignoredValues = [],
 }: {
   detections: DetectionResult[];
   onAnonymize: (detections: DetectionResult[]) => void;
@@ -26,6 +30,10 @@ export function SimpleWarningBadge({
   autoAiEnabled?: boolean;
   isAiScanning?: boolean;
   onEnableAutoAiScan?: () => Promise<void>;
+  onIgnoreDetection?: (detection: DetectionResult | AiDetection) => void;
+  onDismissBadge?: () => void;
+  isDismissed?: boolean;
+  ignoredValues?: string[];
 }) {
   const [showPopup, setShowPopup] = useState(false);
   const [aiDetections, setAiDetections] = useState<AiDetection[] | null>(
@@ -37,7 +45,6 @@ export function SimpleWarningBadge({
   const [activeTab, setActiveTab] = useState<'regex' | 'ai'>(
     initialAiDetections && initialAiDetections.length > 0 ? 'ai' : 'regex'
   );
-  const [_, setSuccess] = useState<string>('');
   const badgeRef = useRef<HTMLDivElement>(null);
   const [popupPosition, setPopupPosition] = useState<{
     top?: number;
@@ -160,17 +167,11 @@ export function SimpleWarningBadge({
       );
 
       setAiDetections(result?.detections || []);
-
-      if (result && result.detections && result.detections.length > 0) {
-        setSuccess(
-          `Found ${result.detections.length} potential issue${result.detections.length !== 1 ? 's' : ''}`
-        );
-      } else {
-        setSuccess('No sensitive information detected by AI');
-      }
     } catch (error: any) {
       console.error('AI scan error:', error);
-      if (error.message.includes('Premium subscription required')) {
+      if (error.message.includes('No API key configured')) {
+        setAiError('sign_in_required');
+      } else if (error.message.includes('Premium subscription required')) {
         setAiError('⭐ Upgrade to Premium to unlock AI scanning');
       } else if (error.message.includes('Rate limit exceeded')) {
         setAiError('⏱️ Daily AI scan limit reached. Try again tomorrow.');
@@ -225,12 +226,40 @@ export function SimpleWarningBadge({
     onPopupStateChange(false);
   };
 
-  const totalDetections = Math.max(
-    detections.length,
-    aiDetections?.length || 0
+  // Filter out ignored detections by value
+  const filteredDetections = detections.filter(
+    d => !ignoredValues.includes(d.value)
   );
-  const hasAiDetections = aiDetections && aiDetections.length > 0;
-  const hasAnyDetections = detections.length > 0 || hasAiDetections;
+  const filteredAiDetections = aiDetections?.filter(
+    d => !ignoredValues.includes(d.value)
+  );
+
+  const totalDetections = Math.max(
+    filteredDetections.length,
+    filteredAiDetections?.length || 0
+  );
+  const hasAiDetections =
+    filteredAiDetections && filteredAiDetections.length > 0;
+  const hasAnyDetections = filteredDetections.length > 0 || hasAiDetections;
+
+  const handleIgnoreClick = (
+    detection: DetectionResult | AiDetection,
+    e?: React.MouseEvent
+  ) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    onIgnoreDetection?.(detection);
+  };
+
+  const handleDismissClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowPopup(false);
+    onPopupStateChange(false);
+    onDismissBadge?.();
+  };
 
   const renderPopup = () => {
     if (!popupPosition) return null;
@@ -260,6 +289,32 @@ export function SimpleWarningBadge({
       popupStyle.top = `${popupPosition.top}px`;
     }
 
+    const handleClosePopup = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setShowPopup(false);
+      onPopupStateChange(false);
+    };
+
+    const closeButtonStyle: React.CSSProperties = {
+      position: 'absolute',
+      top: '8px',
+      right: '8px',
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      padding: '4px',
+      color: '#666',
+      fontSize: '18px',
+      lineHeight: 1,
+      borderRadius: '4px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '24px',
+      height: '24px',
+    };
+
     const popupContent = (
       <div
         onClick={e => {
@@ -269,11 +324,34 @@ export function SimpleWarningBadge({
         onMouseDown={e => {
           e.stopPropagation();
         }}
-        style={popupStyle}
+        style={{ ...popupStyle, position: 'fixed' as const }}
       >
+        {/* Close button for popup */}
+        <button
+          type="button"
+          onClick={handleClosePopup}
+          title="Close"
+          style={closeButtonStyle}
+          onMouseEnter={e => {
+            (e.target as HTMLButtonElement).style.backgroundColor = '#f0f0f0';
+          }}
+          onMouseLeave={e => {
+            (e.target as HTMLButtonElement).style.backgroundColor =
+              'transparent';
+          }}
+        >
+          ✕
+        </button>
+
         {/* Show "No PII Detected" when there are no detections */}
         {!hasAnyDetections && !aiScanning ? (
-          <div style={{ textAlign: 'center', padding: '20px' }}>
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '20px',
+              paddingTop: '10px',
+            }}
+          >
             <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
             <div
               style={{
@@ -320,13 +398,13 @@ export function SimpleWarningBadge({
             </p>
           </div>
         ) : (
-          <>
+          <div style={{ paddingTop: '10px' }}>
             <div
               style={{
                 fontWeight: '600',
-                marginBottom: '12px',
                 fontSize: '16px',
                 color: '#333',
+                marginBottom: '12px',
               }}
             >
               ⚠️ PII Detected{' '}
@@ -364,7 +442,8 @@ export function SimpleWarningBadge({
                 }}
               >
                 Pattern Match{' '}
-                {detections.length > 0 && `(${detections.length})`}
+                {filteredDetections.length > 0 &&
+                  `(${filteredDetections.length})`}
               </button>
               <button
                 type="button"
@@ -390,9 +469,9 @@ export function SimpleWarningBadge({
                 }}
               >
                 🤖 AI Scan{' '}
-                {aiDetections &&
-                  aiDetections.length > 0 &&
-                  `(${aiDetections.length})`}
+                {filteredAiDetections &&
+                  filteredAiDetections.length > 0 &&
+                  `(${filteredAiDetections.length})`}
                 {!autoAiEnabled && (
                   <span
                     style={{
@@ -414,8 +493,8 @@ export function SimpleWarningBadge({
             <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
               {activeTab === 'regex' ? (
                 <>
-                  {detections.length > 0 ? (
-                    detections.map((d, idx) => (
+                  {filteredDetections.length > 0 ? (
+                    filteredDetections.map((d, idx) => (
                       <div
                         key={idx}
                         style={{
@@ -452,33 +531,64 @@ export function SimpleWarningBadge({
                         >
                           {d.value}
                         </div>
-                        <button
-                          type="button"
-                          onClick={e => handleAnonymizeClick(d, e)}
-                          style={{
-                            backgroundColor: '#ff9800',
-                            color: 'white',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '13px',
-                            fontWeight: '500',
-                            width: '100%',
-                          }}
-                          onMouseEnter={e => {
-                            (
-                              e.target as HTMLButtonElement
-                            ).style.backgroundColor = '#f57c00';
-                          }}
-                          onMouseLeave={e => {
-                            (
-                              e.target as HTMLButtonElement
-                            ).style.backgroundColor = '#ff9800';
-                          }}
-                        >
-                          Anonymize This
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={e => handleAnonymizeClick(d, e)}
+                            style={{
+                              backgroundColor: '#ff9800',
+                              color: 'white',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              fontWeight: '500',
+                              flex: 1,
+                            }}
+                            onMouseEnter={e => {
+                              (
+                                e.target as HTMLButtonElement
+                              ).style.backgroundColor = '#f57c00';
+                            }}
+                            onMouseLeave={e => {
+                              (
+                                e.target as HTMLButtonElement
+                              ).style.backgroundColor = '#ff9800';
+                            }}
+                          >
+                            Anonymize
+                          </button>
+                          {onIgnoreDetection && (
+                            <button
+                              type="button"
+                              onClick={e => handleIgnoreClick(d, e)}
+                              title="Ignore this detection"
+                              style={{
+                                backgroundColor: '#e0e0e0',
+                                color: '#666',
+                                border: 'none',
+                                padding: '6px 12px',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '13px',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={e => {
+                                (
+                                  e.target as HTMLButtonElement
+                                ).style.backgroundColor = '#bdbdbd';
+                              }}
+                              onMouseLeave={e => {
+                                (
+                                  e.target as HTMLButtonElement
+                                ).style.backgroundColor = '#e0e0e0';
+                              }}
+                            >
+                              Ignore
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -493,7 +603,7 @@ export function SimpleWarningBadge({
                     </div>
                   )}
 
-                  {detections.length > 1 && (
+                  {filteredDetections.length > 1 && (
                     <button
                       type="button"
                       onClick={handleAnonymizeAll}
@@ -518,7 +628,7 @@ export function SimpleWarningBadge({
                           '#d32f2f';
                       }}
                     >
-                      Anonymize All ({detections.length})
+                      Anonymize All ({filteredDetections.length})
                     </button>
                   )}
                 </>
@@ -563,12 +673,25 @@ export function SimpleWarningBadge({
                           >
                             i
                           </span>
-                          <span style={{ fontSize: '12px', color: '#1565c0', textAlign: 'left' }}>
-                            Auto AI Scan is disabled. Enable it for automatic scanning or run a one-time scan.
+                          <span
+                            style={{
+                              fontSize: '12px',
+                              color: '#1565c0',
+                              textAlign: 'left',
+                            }}
+                          >
+                            Auto AI Scan is disabled. Enable it for automatic
+                            scanning or run a one-time scan.
                           </span>
                         </div>
                       )}
-                      <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: '8px',
+                          flexDirection: 'column',
+                        }}
+                      >
                         {!autoAiEnabled && onEnableAutoAiScan && (
                           <button
                             type="button"
@@ -653,20 +776,65 @@ export function SimpleWarningBadge({
                   )}
 
                   {aiError && (
-                    <div
-                      style={{
-                        padding: '15px',
-                        backgroundColor: '#ffebee',
-                        color: '#c62828',
-                        borderRadius: '4px',
-                        textAlign: 'center',
-                      }}
-                    >
-                      {aiError}
-                    </div>
+                    aiError === 'sign_in_required' ? (
+                      <div
+                        style={{
+                          padding: '15px',
+                          backgroundColor: '#e3f2fd',
+                          borderRadius: '4px',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔒</div>
+                        <div style={{ fontWeight: '600', color: '#1565c0', marginBottom: '6px' }}>
+                          Sign in to use AI Scan
+                        </div>
+                        <p style={{ color: '#666', fontSize: '13px', marginBottom: '12px' }}>
+                          AI-powered PII detection requires a PasteProof account.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.open('https://pasteproof.com/auth/extension', '_blank');
+                          }}
+                          style={{
+                            backgroundColor: '#1976d2',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 20px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                          }}
+                          onMouseEnter={e => {
+                            (e.target as HTMLButtonElement).style.backgroundColor = '#1565c0';
+                          }}
+                          onMouseLeave={e => {
+                            (e.target as HTMLButtonElement).style.backgroundColor = '#1976d2';
+                          }}
+                        >
+                          Sign In
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          padding: '15px',
+                          backgroundColor: '#ffebee',
+                          color: '#c62828',
+                          borderRadius: '4px',
+                          textAlign: 'center',
+                        }}
+                      >
+                        {aiError}
+                      </div>
+                    )
                   )}
 
-                  {aiDetections && aiDetections.length > 0 && (
+                  {filteredAiDetections && filteredAiDetections.length > 0 && (
                     <>
                       <div
                         style={{
@@ -679,10 +847,11 @@ export function SimpleWarningBadge({
                           fontWeight: '500',
                         }}
                       >
-                        ✨ AI detected {aiDetections.length} potential issue
-                        {aiDetections.length !== 1 ? 's' : ''}
+                        ✨ AI detected {filteredAiDetections.length} potential
+                        issue
+                        {filteredAiDetections.length !== 1 ? 's' : ''}
                       </div>
-                      {aiDetections.map((d, idx) => (
+                      {filteredAiDetections.map((d, idx) => (
                         <div
                           key={idx}
                           style={{
@@ -747,41 +916,72 @@ export function SimpleWarningBadge({
                           >
                             {d.reason}
                           </div>
-                          <button
-                            type="button"
-                            onClick={e => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleAnonymizeClick(d);
-                            }}
-                            style={{
-                              backgroundColor: '#9c27b0',
-                              color: 'white',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              fontSize: '13px',
-                              fontWeight: '500',
-                              width: '100%',
-                            }}
-                            onMouseEnter={e => {
-                              (
-                                e.target as HTMLButtonElement
-                              ).style.backgroundColor = '#7b1fa2';
-                            }}
-                            onMouseLeave={e => {
-                              (
-                                e.target as HTMLButtonElement
-                              ).style.backgroundColor = '#9c27b0';
-                            }}
-                          >
-                            Anonymize This
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleAnonymizeClick(d);
+                              }}
+                              style={{
+                                backgroundColor: '#9c27b0',
+                                color: 'white',
+                                border: 'none',
+                                padding: '6px 12px',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '13px',
+                                fontWeight: '500',
+                                flex: 1,
+                              }}
+                              onMouseEnter={e => {
+                                (
+                                  e.target as HTMLButtonElement
+                                ).style.backgroundColor = '#7b1fa2';
+                              }}
+                              onMouseLeave={e => {
+                                (
+                                  e.target as HTMLButtonElement
+                                ).style.backgroundColor = '#9c27b0';
+                              }}
+                            >
+                              Anonymize
+                            </button>
+                            {onIgnoreDetection && (
+                              <button
+                                type="button"
+                                onClick={e => handleIgnoreClick(d, e)}
+                                title="Ignore this detection"
+                                style={{
+                                  backgroundColor: '#e0e0e0',
+                                  color: '#666',
+                                  border: 'none',
+                                  padding: '6px 12px',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontSize: '13px',
+                                  fontWeight: '500',
+                                }}
+                                onMouseEnter={e => {
+                                  (
+                                    e.target as HTMLButtonElement
+                                  ).style.backgroundColor = '#bdbdbd';
+                                }}
+                                onMouseLeave={e => {
+                                  (
+                                    e.target as HTMLButtonElement
+                                  ).style.backgroundColor = '#e0e0e0';
+                                }}
+                              >
+                                Ignore
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
 
-                      {aiDetections.length > 1 && (
+                      {filteredAiDetections.length > 1 && (
                         <button
                           type="button"
                           onClick={e => {
@@ -812,7 +1012,7 @@ export function SimpleWarningBadge({
                             ).style.backgroundColor = '#d32f2f';
                           }}
                         >
-                          Redact All ({aiDetections.length})
+                          Redact All ({filteredAiDetections.length})
                         </button>
                       )}
                     </>
@@ -834,7 +1034,34 @@ export function SimpleWarningBadge({
                 </>
               )}
             </div>
-          </>
+
+            {/* Dismiss warnings link */}
+            {onDismissBadge && (
+              <div style={{ marginTop: '12px', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={handleDismissClick}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#666',
+                    fontSize: '12px',
+                    textDecoration: 'underline',
+                    padding: '4px 8px',
+                  }}
+                  onMouseEnter={e => {
+                    (e.target as HTMLButtonElement).style.color = '#333';
+                  }}
+                  onMouseLeave={e => {
+                    (e.target as HTMLButtonElement).style.color = '#666';
+                  }}
+                >
+                  Dismiss warnings for this field
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -843,13 +1070,29 @@ export function SimpleWarningBadge({
     return createPortal(popupContent, document.body);
   };
 
-  // Always show dot when alwaysShowDot is true, or show small purple dot for AI-only detections
-  if (variant === 'dot' || (alwaysShowDot && !hasAnyDetections)) {
-    // Determine dot color based on detection status
-    const dotColor = hasAnyDetections ? '#9c27b0' : '#94a3b8'; // Purple for detections, gray for no detections
-    const dotTitle = hasAnyDetections
-      ? 'PII detected - Click to view'
-      : 'No PII detected - Click to scan';
+  // Show dismissed indicator (small purple pulsing dot) when user has dismissed the badge
+  // Also show dot when alwaysShowDot is true, or when variant is 'dot'
+  if (
+    isDismissed ||
+    variant === 'dot' ||
+    (alwaysShowDot && !hasAnyDetections)
+  ) {
+    // When dismissed with detections, always show purple pulsing dot
+    // When not dismissed, use original logic
+    const showDismissedState =
+      isDismissed &&
+      (detections.length > 0 || (aiDetections && aiDetections.length > 0));
+    const dotColor = showDismissedState
+      ? '#9c27b0'
+      : hasAnyDetections
+        ? '#9c27b0'
+        : '#94a3b8';
+    const shouldPulse = showDismissedState || hasAnyDetections;
+    const dotTitle = showDismissedState
+      ? 'Warnings dismissed - Click to view'
+      : hasAnyDetections
+        ? 'PII detected - Click to view'
+        : 'No PII detected - Click to scan';
 
     return (
       <div style={{ position: 'relative', zIndex: 10000 }}>
@@ -866,11 +1109,11 @@ export function SimpleWarningBadge({
             backgroundColor: dotColor,
             borderRadius: '50%',
             cursor: 'pointer',
-            boxShadow: hasAnyDetections
+            boxShadow: shouldPulse
               ? '0 2px 4px rgba(156, 39, 176, 0.4)'
               : '0 2px 4px rgba(148, 163, 184, 0.4)',
             position: 'relative',
-            animation: hasAnyDetections ? 'pulse 2s infinite' : 'none',
+            animation: shouldPulse ? 'pulse 2s infinite' : 'none',
           }}
         />
 

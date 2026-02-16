@@ -1,5 +1,6 @@
 // src/shared/api-client.ts
 import { CustomPattern } from './pii-detector';
+import { apiCache } from './api-cache';
 
 // Determine API base URL from environment variable
 // Set VITE_SELF_HOSTED_API_URL in .env to use self-hosted backend
@@ -60,6 +61,35 @@ export type Team = {
   name: string;
   created_at: number;
   updated_at: number;
+};
+
+export type SiteScanRequest = {
+  url: string;
+  meta?: {
+    title?: string;
+    has_shopping_cart?: boolean;
+    visible_text_snippet?: string;
+  };
+  deep_analysis?: boolean;
+};
+
+export type SiteScanResult = {
+  verdict: 'SAFE' | 'SUSPICIOUS' | 'MALICIOUS';
+  score: number;
+  flags: string[];
+  details: {
+    business_logic?: {
+      brand?: string;
+      reason?: string;
+      official_domains?: string[];
+    };
+    domain_forensics?: {
+      age_days?: number;
+      is_new_domain?: boolean;
+      registrar?: string;
+    };
+  };
+  analysis_time_ms: number;
 };
 
 export type TeamPolicy = {
@@ -215,6 +245,10 @@ export class PasteProofApiClient {
       method: 'POST',
       body: JSON.stringify({ domain: safeDomain }),
     });
+
+    // Invalidate cache for this domain
+    await apiCache.invalidateWhitelistCheck(safeDomain);
+
     return data.whitelist;
   }
 
@@ -227,6 +261,13 @@ export class PasteProofApiClient {
 
   async isWhitelisted(domain: string): Promise<boolean> {
     const safeDomain = this.validateDomain(domain);
+
+    // Check cache first
+    const cached = await apiCache.getWhitelistCheck(safeDomain);
+    if (cached !== null) {
+      return cached;
+    }
+
     const data = await this.fetch<{ whitelisted: boolean }>(
       '/v1/whitelist/check',
       {
@@ -234,6 +275,10 @@ export class PasteProofApiClient {
         body: JSON.stringify({ domain: safeDomain }),
       }
     );
+
+    // Cache the result
+    await apiCache.setWhitelistCheck(safeDomain, data.whitelisted);
+
     return data.whitelisted;
   }
 
@@ -266,6 +311,30 @@ export class PasteProofApiClient {
     }
 
     return context.trim();
+  }
+
+  // Site Safety Scan
+  async scanUrl(request: SiteScanRequest): Promise<SiteScanResult> {
+    // Validate URL
+    if (!request.url || typeof request.url !== 'string') {
+      throw new Error('Invalid URL: must be a non-empty string');
+    }
+
+    try {
+      new URL(request.url);
+    } catch {
+      throw new Error('Invalid URL format');
+    }
+
+    const data = await this.fetch<SiteScanResult>('/v1/scan', {
+      method: 'POST',
+      body: JSON.stringify({
+        url: request.url,
+        meta: request.meta,
+        deep_analysis: request.deep_analysis ?? false,
+      }),
+    });
+    return data;
   }
 
   // AI Context Analysis
@@ -382,9 +451,19 @@ export class PasteProofApiClient {
 
   // Fetch all custom patterns (user's personal patterns)
   async getPatterns(): Promise<CustomPattern[]> {
+    // Check cache first
+    const cached = await apiCache.getPatterns<CustomPattern[]>();
+    if (cached !== null) {
+      return cached;
+    }
+
     const data = await this.fetch<{ patterns: CustomPattern[] }>(
       '/v1/patterns'
     );
+
+    // Cache the result
+    await apiCache.setPatterns(data.patterns);
+
     return data.patterns;
   }
 
@@ -402,6 +481,10 @@ export class PasteProofApiClient {
         body: JSON.stringify(pattern),
       }
     );
+
+    // Invalidate patterns cache
+    await apiCache.invalidatePatterns();
+
     return data.pattern;
   }
 
@@ -415,6 +498,9 @@ export class PasteProofApiClient {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
+
+    // Invalidate patterns cache
+    await apiCache.invalidatePatterns();
   }
 
   // Delete a pattern
@@ -423,6 +509,9 @@ export class PasteProofApiClient {
     await this.fetch(`/v1/patterns/${safeId}`, {
       method: 'DELETE',
     });
+
+    // Invalidate patterns cache
+    await apiCache.invalidatePatterns();
   }
 
   // Log a detection event
@@ -452,6 +541,31 @@ export class PasteProofApiClient {
     subscription_status: string;
   }> {
     return this.fetch('/v1/user');
+  }
+
+  // Validate authentication token
+  async validateToken(): Promise<{
+    valid: boolean;
+    user?: {
+      id: string;
+      email: string;
+      subscription_tier: string;
+      subscription_status: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const user = await this.getUserInfo();
+      return {
+        valid: true,
+        user,
+      };
+    } catch (error: any) {
+      return {
+        valid: false,
+        error: error.message || 'Invalid or expired authentication token',
+      };
+    }
   }
 
   async logDetection(detection: {
@@ -493,7 +607,17 @@ export class PasteProofApiClient {
   // Team methods
   async getTeams(): Promise<Team[]> {
     try {
+      // Check cache first
+      const cached = await apiCache.getTeams<Team[]>();
+      if (cached !== null) {
+        return cached;
+      }
+
       const data = await this.fetch<{ teams: Team[] }>('/v1/teams');
+
+      // Cache the result
+      await apiCache.setTeams(data.teams);
+
       return data.teams;
     } catch (error) {
       console.warn('Failed to fetch teams:', error);
@@ -505,11 +629,18 @@ export class PasteProofApiClient {
   async getTeamPolicies(teamId: string): Promise<TeamPolicy[]> {
     try {
       const safeId = this.validateId(teamId);
+
+      // Check cache first
+      const cached = await apiCache.getTeamPolicies<TeamPolicy[]>(safeId);
+      if (cached !== null) {
+        return cached;
+      }
+
       const data = await this.fetch<{ policies: TeamPolicy[] }>(
         `/v1/teams/${safeId}/policies`
       );
       // Parse policy_data if it's a string with error handling
-      return data.policies.map(policy => {
+      const policies = data.policies.map(policy => {
         try {
           return {
             ...policy,
@@ -524,6 +655,11 @@ export class PasteProofApiClient {
           return policy;
         }
       });
+
+      // Cache the result
+      await apiCache.setTeamPolicies(safeId, policies);
+
+      return policies;
     } catch (error) {
       console.warn('Failed to fetch team policies:', error);
       return [];
@@ -550,6 +686,11 @@ export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
 
-export function clearApiClient(): void {
+export async function clearApiClient(): Promise<void> {
   apiClient = null;
+  // Clear all cached data on logout
+  await apiCache.clearAll();
 }
+
+// Re-export cache for direct invalidation when needed
+export { apiCache } from './api-cache';

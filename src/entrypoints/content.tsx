@@ -10,9 +10,11 @@ import {
   getApiClient,
   initializeApiClient,
   type TeamPolicy,
+  type SiteScanResult,
 } from '@/shared/api-client';
-import { SimpleWarningBadge } from '@/shared/components';
+import { SimpleWarningBadge, SiteSafetyWarning } from '@/shared/components';
 import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
+import { siteScanOptimizer } from '@/shared/site-scan-optimizer';
 import { startAiScan, completeAiScan, failAiScan } from '@/shared/ai-scan-state';
 
 const MIN_TEXT_LENGTH = 10;
@@ -89,6 +91,11 @@ export default defineContentScript({
       (await storage.getItem<boolean>('local:autoAiScan')) ?? false;
     if (!enabled) {
       return;
+    }
+
+    // Initialize API client early if we have a token
+    if (authToken) {
+      initializeApiClient(authToken);
     }
 
     // ============================================
@@ -221,25 +228,16 @@ export default defineContentScript({
 
     if (authToken) {
       const currentDomain = window.location.hostname;
-      try {
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/v1/whitelist/check`,
-          {
-            method: 'POST',
-            headers: {
-              'X-API-Key': authToken,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ domain: currentDomain }),
+      const apiClient = getApiClient();
+      if (apiClient) {
+        try {
+          const isWhitelisted = await apiClient.isWhitelisted(currentDomain);
+          if (isWhitelisted) {
+            return;
           }
-        );
-        const data = await response.json();
-
-        if (data.whitelisted) {
-          return;
+        } catch (error) {
+          console.error('Failed to check whitelist:', error);
         }
-      } catch (error) {
-        console.error('Failed to check whitelist:', error);
       }
     }
 
@@ -259,11 +257,226 @@ export default defineContentScript({
     let isAnonymizing = false; // Flag to prevent input handlers from interfering during anonymization
     let keepPopupOpenAfterAnonymize = false; // Flag to keep popup open during single item anonymization
     let isAiScanning = false; // Flag to track when AI scan is in progress
+    let sessionIgnoredValues = new Set<string>(); // Per-tab session ignore list (synced with background)
+    let isBadgeDismissed = false; // Track if user dismissed the warning badge
+    let isPageDismissed = false; // Track if user dismissed all warnings for this page session
+    let lastAuthError: string | null = null; // Track last authentication error
+
+    // Site safety scan state
+    let siteSafetyContainer: HTMLDivElement | null = null;
+    let siteSafetyRoot: Root | null = null;
+    let siteScanResult: SiteScanResult | null = null;
+    let siteScanInProgress = false;
+    let siteScanDismissed = false; // User chose to proceed despite warning
+
+    // Restore ignore list from background (persists across navigations in same tab)
+    try {
+      const savedValues: string[] = await browser.runtime.sendMessage({ action: 'getIgnoredValues' });
+      if (Array.isArray(savedValues)) {
+        sessionIgnoredValues = new Set(savedValues);
+      }
+    } catch {
+      // Background not ready or no saved values — start fresh
+    }
+
+    // Helper to filter detections against the session ignore list
+    const filterIgnored = <T extends { value: string }>(detections: T[]): T[] =>
+      detections.filter(d => !sessionIgnoredValues.has(d.value));
 
     // Handler to enable auto AI scan globally
     const handleEnableAutoAiScan = async () => {
       await storage.setItem('local:autoAiScan', true);
       autoAiScan = true;
+    };
+
+    // Handler to ignore a specific detection (persists for the tab session)
+    const handleIgnoreDetection = (detection: { type: string; value: string }) => {
+      if (!sessionIgnoredValues.has(detection.value)) {
+        sessionIgnoredValues.add(detection.value);
+        // Sync with background for persistence across navigations
+        browser.runtime.sendMessage({ action: 'addIgnoredValue', value: detection.value }).catch(() => {});
+        // Immediately re-render badge with updated ignore list (no debounce)
+        if (activeInput) {
+          const expectedTypes = getExpectedInputType(activeInput);
+          const currentValue = getInputValue(activeInput);
+          const results = detectPii(currentValue);
+          const filteredResults = filterIgnored(filterExpectedDetections(results, expectedTypes));
+          const existingAi = (activeInput as any).__pasteproofAiDetections || null;
+          const filteredAi = existingAi ? filterIgnored(existingAi) : null;
+          handleDetection(filteredResults, filteredAi);
+        }
+      }
+    };
+
+    // Handler to dismiss the warning badge entirely for this page session
+    const handleDismissBadge = () => {
+      isBadgeDismissed = true;
+      isPageDismissed = true;
+      removeAllIndicators();
+    };
+
+    // Helper to trigger badge re-render with current state
+    const updateBadgeDisplay = () => {
+      if (activeInput) {
+        // Trigger a re-scan to update the display
+        const event = new Event('input', { bubbles: true });
+        activeInput.dispatchEvent(event);
+      }
+    };
+
+    // Site safety scan functions
+    const performSiteSafetyScan = async (): Promise<SiteScanResult | null> => {
+      console.log('[Site Safety] performSiteSafetyScan called', {
+        siteScanInProgress,
+        siteScanDismissed,
+        url: window.location.href,
+      });
+
+      if (siteScanInProgress || siteScanDismissed) {
+        console.log('[Site Safety] Skipping scan - already in progress or dismissed');
+        return null;
+      }
+
+      const currentUrl = window.location.href;
+
+      // Check cache first
+      const cachedResult = siteScanOptimizer.getCachedResult(currentUrl);
+      if (cachedResult) {
+        console.log('[Site Safety] Returning cached result:', cachedResult);
+        return cachedResult;
+      }
+
+      siteScanInProgress = true;
+
+      try {
+        // Gather page metadata for the scan
+        const meta: {
+          title?: string;
+          has_shopping_cart?: boolean;
+          visible_text_snippet?: string;
+        } = {
+          title: document.title,
+        };
+
+        // Check for shopping cart indicators
+        const cartIndicators = [
+          'cart', 'basket', 'checkout', 'buy', 'purchase', 'order'
+        ];
+        const pageText = document.body?.innerText?.toLowerCase() || '';
+        meta.has_shopping_cart = cartIndicators.some(
+          indicator =>
+            pageText.includes(indicator) ||
+            document.querySelector(`[class*="${indicator}"], [id*="${indicator}"]`) !== null
+        );
+
+        // Get visible text snippet (first 500 chars)
+        const visibleText = document.body?.innerText?.substring(0, 500) || '';
+        if (visibleText) {
+          meta.visible_text_snippet = visibleText;
+        }
+
+        console.log('[Site Safety] Calling API to scan URL:', currentUrl);
+        
+        // Call the scan endpoint directly (no auth required)
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/v1/scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: currentUrl,
+            meta,
+            deep_analysis: false,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Scan failed: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        console.log('[Site Safety] Scan result received:', result);
+
+        // Cache the result
+        siteScanOptimizer.cacheResult(currentUrl, result);
+        siteScanInProgress = false;
+
+        return result;
+      } catch (error) {
+        console.warn('Site safety scan failed:', error);
+        siteScanInProgress = false;
+        return null;
+      }
+    };
+
+    const showSiteSafetyWarning = (result: SiteScanResult) => {
+      if (siteSafetyContainer || siteScanDismissed) return;
+
+      siteScanResult = result;
+
+      // Create container for the warning
+      siteSafetyContainer = document.createElement('div');
+      siteSafetyContainer.id = 'pasteproof-site-safety-warning';
+      document.body.appendChild(siteSafetyContainer);
+
+      siteSafetyRoot = ReactDOM.createRoot(siteSafetyContainer);
+      siteSafetyRoot.render(
+        <SiteSafetyWarning
+          scanResult={result}
+          onDismiss={handleLeaveSite}
+          onProceedAnyway={handleProceedAnyway}
+        />
+      );
+    };
+
+    const removeSiteSafetyWarning = () => {
+      if (siteSafetyRoot) {
+        siteSafetyRoot.unmount();
+        siteSafetyRoot = null;
+      }
+      if (siteSafetyContainer) {
+        siteSafetyContainer.remove();
+        siteSafetyContainer = null;
+      }
+    };
+
+    const handleLeaveSite = () => {
+      // Navigate back or close the tab
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
+    };
+
+    const handleProceedAnyway = () => {
+      siteScanDismissed = true;
+      removeSiteSafetyWarning();
+    };
+
+    // Trigger site safety scan on first form interaction
+    const checkSiteSafety = async () => {
+      console.log('[Site Safety] checkSiteSafety called', {
+        siteScanDismissed,
+        siteScanResult,
+      });
+
+      if (siteScanDismissed || siteScanResult) {
+        console.log('[Site Safety] Skipping check - already dismissed or result exists');
+        return;
+      }
+
+      const result = await performSiteSafetyScan();
+
+      console.log('[Site Safety] Check complete, verdict:', result?.verdict);
+
+      if (result && (result.verdict === 'MALICIOUS' || result.verdict === 'SUSPICIOUS')) {
+        console.log('[Site Safety] Showing warning for', result.verdict, 'site');
+        showSiteSafetyWarning(result);
+      } else if (result) {
+        console.log('[Site Safety] Site is SAFE - no warning needed');
+      }
     };
 
     // Initialize team policies on page load
@@ -791,15 +1004,16 @@ export default defineContentScript({
       const skipAi = shouldSkipAiForInput(activeInput);
       const currentValue = getInputValue(activeInput);
       const results = detectPii(currentValue);
-      const filteredResults = filterExpectedDetections(results, expectedTypes);
+      const filteredResults = filterIgnored(filterExpectedDetections(results, expectedTypes));
 
       // Immediately update the badge with new pattern results and preserved AI detections
       // This prevents the badge from disappearing
+      const filteredUpdatedAi = updatedAiDetections && updatedAiDetections.length > 0
+        ? filterIgnored(updatedAiDetections)
+        : null;
       handleDetection(
         filteredResults,
-        updatedAiDetections && updatedAiDetections.length > 0
-          ? updatedAiDetections
-          : null
+        filteredUpdatedAi && filteredUpdatedAi.length > 0 ? filteredUpdatedAi : null
       );
 
       // Reset flags after badge update is complete
@@ -817,10 +1031,10 @@ export default defineContentScript({
 
           const freshExpectedTypes = getExpectedInputType(activeInput);
           const freshResults = detectPii(getInputValue(activeInput));
-          const freshFiltered = filterExpectedDetections(
+          const freshFiltered = filterIgnored(filterExpectedDetections(
             freshResults,
             freshExpectedTypes
-          );
+          ));
           const freshAiDetections = await performAiScan(
             activeInput,
             currentValue,
@@ -828,11 +1042,12 @@ export default defineContentScript({
           );
 
           // Store fresh AI detections
-          if (freshAiDetections) {
-            (activeInput as any).__pasteproofAiDetections = freshAiDetections;
+          const filteredFreshAi = freshAiDetections ? filterIgnored(freshAiDetections) : null;
+          if (filteredFreshAi) {
+            (activeInput as any).__pasteproofAiDetections = filteredFreshAi;
           }
 
-          handleDetection(freshFiltered, freshAiDetections);
+          handleDetection(freshFiltered, filteredFreshAi);
         }, 500); // Wait 500ms before re-running AI scan
       }
     };
@@ -1163,10 +1378,6 @@ export default defineContentScript({
           return true;
         });
 
-        if (filteredDetections.length !== detections.length) {
-        }
-        filteredDetections.forEach((d, idx) => {});
-
         // Log all detections (local + AI)
         if (filteredDetections.length > 0) {
           const domain = window.location.hostname;
@@ -1201,10 +1412,28 @@ export default defineContentScript({
 
         // Track AI scan failure
         await failAiScan(error.message || 'Unknown error');
+        
+        // Provide better error messages for authentication issues
         if (
+          error.message?.includes('Invalid authentication') ||
+          error.message?.includes('authentication token') ||
+          error.message?.includes('Unauthorized')
+        ) {
+          lastAuthError = error.message || 'Invalid authentication token';
+          console.error(
+            '⚠️ Authentication Error: Your API key may be invalid or expired.\n' +
+            'To fix this:\n' +
+            '1. Open the PasteProof extension popup\n' +
+            '2. Click "Test Connection" to verify your API key\n' +
+            '3. If invalid, sign out and sign back in'
+          );
+        } else if (
           error.message?.includes('Premium subscription required') ||
           error.message?.includes('Rate limit exceeded')
         ) {
+          // These are expected errors for non-premium users
+        } else {
+          lastAuthError = null; // Clear auth error if it's a different type of error
         }
         isAiScanning = false;
         return null;
@@ -1340,6 +1569,9 @@ export default defineContentScript({
       detections: DetectionResult[],
       aiDetections: any[] | null = null
     ) => {
+      // Skip all badge rendering if user dismissed warnings for this page session
+      if (isPageDismissed) return;
+
       // Log pattern-based detections
       if (detections.length > 0 && !badgeContainer && !dotContainer) {
         const domain = window.location.hostname;
@@ -1389,10 +1621,14 @@ export default defineContentScript({
               }}
               inputText={currentText}
               initialAiDetections={aiDetections || undefined}
-              variant="full"
+              variant={isBadgeDismissed ? 'dot' : 'full'}
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
               onEnableAutoAiScan={handleEnableAutoAiScan}
+              onIgnoreDetection={handleIgnoreDetection}
+              onDismissBadge={handleDismissBadge}
+              isDismissed={isBadgeDismissed}
+              ignoredValues={[...sessionIgnoredValues]}
             />
           );
         } else if (badgeRoot) {
@@ -1405,10 +1641,14 @@ export default defineContentScript({
               }}
               inputText={currentText}
               initialAiDetections={aiDetections || undefined}
-              variant="full"
+              variant={isBadgeDismissed ? 'dot' : 'full'}
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
               onEnableAutoAiScan={handleEnableAutoAiScan}
+              onIgnoreDetection={handleIgnoreDetection}
+              onDismissBadge={handleDismissBadge}
+              isDismissed={isBadgeDismissed}
+              ignoredValues={[...sessionIgnoredValues]}
             />
           );
         }
@@ -1436,6 +1676,10 @@ export default defineContentScript({
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
               onEnableAutoAiScan={handleEnableAutoAiScan}
+              onIgnoreDetection={handleIgnoreDetection}
+              onDismissBadge={handleDismissBadge}
+              isDismissed={isBadgeDismissed}
+              ignoredValues={[...sessionIgnoredValues]}
             />
           );
         } else if (dotRoot) {
@@ -1453,6 +1697,10 @@ export default defineContentScript({
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
               onEnableAutoAiScan={handleEnableAutoAiScan}
+              onIgnoreDetection={handleIgnoreDetection}
+              onDismissBadge={handleDismissBadge}
+              isDismissed={isBadgeDismissed}
+              ignoredValues={[...sessionIgnoredValues]}
             />
           );
         }
@@ -1560,26 +1808,24 @@ export default defineContentScript({
         input as HTMLInputElement | HTMLTextAreaElement
       );
 
-      if (expectedTypes.size > 0) {
-      }
-
       const results = detectPii(text);
-      const filteredResults = filterExpectedDetections(results, expectedTypes);
+      const filteredResults = filterIgnored(filterExpectedDetections(results, expectedTypes));
 
       // Get existing AI detections to preserve them if not running a new AI scan
       const existingAiDetections =
         (input as any).__pasteproofAiDetections || null;
+      const filteredExistingAi = existingAiDetections ? filterIgnored(existingAiDetections) : null;
 
       // Show pattern detections immediately for instant feedback
       // Preserve existing AI detections if not running a new scan
-      handleDetection(filteredResults, existingAiDetections);
+      handleDetection(filteredResults, filteredExistingAi);
 
       // Then trigger AI scan asynchronously and update when ready
       if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(text)) {
         // Perform AI scan in background without blocking UI
         performAiScan(input, text, filteredResults).then(aiDetections => {
           // Update with AI detections when they're ready
-          handleDetection(filteredResults, aiDetections);
+          handleDetection(filteredResults, aiDetections ? filterIgnored(aiDetections) : null);
         });
       }
     }, 800);
@@ -1592,7 +1838,7 @@ export default defineContentScript({
       const skipAi = shouldSkipAiForInput(contextMenuInput);
       const currentValue = getInputValue(contextMenuInput);
       const results = detectPii(currentValue);
-      const filteredResults = filterExpectedDetections(results, expectedTypes);
+      const filteredResults = filterIgnored(filterExpectedDetections(results, expectedTypes));
 
       // Show pattern detections immediately for instant feedback
       handleDetection(filteredResults, null);
@@ -1604,7 +1850,7 @@ export default defineContentScript({
         performAiScan(contextMenuInput, currentValue, filteredResults).then(
           aiDetections => {
             // Update with AI detections when they're ready
-            handleDetection(filteredResults, aiDetections);
+            handleDetection(filteredResults, aiDetections ? filterIgnored(aiDetections) : null);
           }
         );
       }
@@ -1644,10 +1890,10 @@ export default defineContentScript({
           const currentValue = getInputValue(input);
 
           const results = detectPii(currentValue);
-          const filteredResults = filterExpectedDetections(
+          const filteredResults = filterIgnored(filterExpectedDetections(
             results,
             expectedTypes
-          );
+          ));
 
           // Show pattern detections immediately for instant feedback
           // For paste, we start fresh with no AI detections (content is new)
@@ -1662,7 +1908,7 @@ export default defineContentScript({
             performAiScan(input, currentValue, filteredResults).then(
               aiDetections => {
                 // Update with AI detections when they're ready
-                handleDetection(filteredResults, aiDetections);
+                handleDetection(filteredResults, aiDetections ? filterIgnored(aiDetections) : null);
               }
             );
           }
@@ -1699,12 +1945,16 @@ export default defineContentScript({
 
         if (!isValidInput(target)) return;
 
-        const inputName =
-          (target as HTMLInputElement).name ||
-          (target as HTMLInputElement).id ||
-          'unnamed';
+        // Trigger site safety check on first form interaction
+        checkSiteSafety();
+
+        // Skip all badge rendering if user dismissed warnings for this page session
+        if (isPageDismissed) return;
 
         removeAllIndicators();
+
+        // Reset dismissed state for new input (ignore list persists per-tab session)
+        isBadgeDismissed = false;
 
         activeInput = target as HTMLInputElement | HTMLTextAreaElement;
         const expectedTypes = getExpectedInputType(activeInput);
@@ -1712,25 +1962,26 @@ export default defineContentScript({
 
         const currentValue = getInputValue(activeInput);
         const results = detectPii(currentValue);
-        const filteredResults = filterExpectedDetections(
+        const filteredResults = filterIgnored(filterExpectedDetections(
           results,
           expectedTypes
-        );
+        ));
 
         // Get existing AI detections (in case user is refocusing on a previously scanned field)
         const existingAiDetections =
           (activeInput as any).__pasteproofAiDetections || null;
+        const filteredExistingAi = existingAiDetections ? filterIgnored(existingAiDetections) : null;
 
         // Show pattern detections immediately for instant feedback
         // Preserve existing AI detections if available
-        handleDetection(filteredResults, existingAiDetections);
+        handleDetection(filteredResults, filteredExistingAi);
 
         // Then trigger AI scan asynchronously and update when ready
         if (autoAiScan && !skipAi && aiScanOptimizer.shouldScan(currentValue)) {
           performAiScan(activeInput, currentValue, filteredResults).then(
             aiDetections => {
               // Update with AI detections when they're ready
-              handleDetection(filteredResults, aiDetections);
+              handleDetection(filteredResults, aiDetections ? filterIgnored(aiDetections) : null);
             }
           );
         }
@@ -1783,10 +2034,10 @@ export default defineContentScript({
           const expectedTypes = getExpectedInputType(activeInput);
           const currentValue = getInputValue(activeInput);
           const results = detectPii(currentValue);
-          const filteredResults = filterExpectedDetections(
+          const filteredResults = filterIgnored(filterExpectedDetections(
             results,
             expectedTypes
-          );
+          ));
 
           badgeRoot.render(
             <SimpleWarningBadge
@@ -1795,10 +2046,14 @@ export default defineContentScript({
               onPopupStateChange={isOpen => {
                 isPopupOpen = isOpen;
               }}
-              variant="full"
+              variant={isBadgeDismissed ? 'dot' : 'full'}
               autoAiEnabled={autoAiScan}
               isAiScanning={isAiScanning}
               onEnableAutoAiScan={handleEnableAutoAiScan}
+              onIgnoreDetection={handleIgnoreDetection}
+              onDismissBadge={handleDismissBadge}
+              isDismissed={isBadgeDismissed}
+              ignoredValues={[...sessionIgnoredValues]}
             />
           );
         }
@@ -1808,7 +2063,9 @@ export default defineContentScript({
     // Flush detection queue before unload
     ctx.onInvalidated(() => {
       removeAllIndicators();
+      removeSiteSafetyWarning();
       aiScanOptimizer.clearCache();
+      siteScanOptimizer.clearCache();
       detectionQueue.flush();
     });
 
