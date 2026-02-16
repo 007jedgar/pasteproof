@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import pasteproofIcon from '@/assets/icons/pasteproof-48.png';
 import {
   initializeApiClient,
-  getApiClient,
   getApiBaseUrl,
   apiCache,
   type Team,
@@ -195,12 +194,10 @@ export default function PopupApp() {
       }
 
       let isWhitelisted = false;
-      if (isAuthenticated) {
+      if (isAuthenticated && authToken) {
         try {
-          const apiClient = getApiClient();
-          if (apiClient) {
-            isWhitelisted = await apiClient.isWhitelisted(domain);
-          }
+          const apiClient = initializeApiClient(authToken);
+          isWhitelisted = await apiClient.isWhitelisted(domain);
         } catch (error) {
           console.error('Failed to check whitelist:', error);
         }

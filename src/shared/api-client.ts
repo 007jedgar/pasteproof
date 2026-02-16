@@ -252,11 +252,16 @@ export class PasteProofApiClient {
     return data.whitelist;
   }
 
-  async removeFromWhitelist(whitelistId: string): Promise<void> {
+  async removeFromWhitelist(whitelistId: string, domain?: string): Promise<void> {
     const safeId = this.validateId(whitelistId);
     await this.fetch(`/v1/whitelist/${safeId}`, {
       method: 'DELETE',
     });
+
+    // Invalidate cache so isWhitelisted() doesn't return stale results
+    if (domain) {
+      await apiCache.invalidateWhitelistCheck(this.validateDomain(domain));
+    }
   }
 
   async isWhitelisted(domain: string): Promise<boolean> {
