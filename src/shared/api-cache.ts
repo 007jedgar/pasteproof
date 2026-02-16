@@ -334,11 +334,39 @@ class ApiCache {
    * Clear all caches (call on logout or auth change)
    */
   async clearAll(): Promise<void> {
+    // Collect dynamic keys (whitelist:*, teamPolicies:*) from memory before clearing
+    const dynamicKeys: string[] = [];
+    for (const key of this.memoryCache.keys()) {
+      if (key.startsWith(CACHE_KEYS.whitelist) || key.startsWith(CACHE_KEYS.teamPolicies)) {
+        dynamicKeys.push(key);
+      }
+    }
+
     this.memoryCache.clear();
+
+    // Remove static keys + any dynamic keys we tracked in memory
     await Promise.all([
       this.storageRemove(CACHE_KEYS.patterns),
       this.storageRemove(CACHE_KEYS.teams),
+      ...dynamicKeys.map(key => this.storageRemove(key)),
     ]);
+
+    // Also scan browser storage for any dynamic keys we may have missed
+    // (e.g., from a previous page load that populated storage but not this memory cache)
+    const storage = getBrowserStorage();
+    if (storage) {
+      try {
+        const allItems = await storage.get(null);
+        const staleKeys = Object.keys(allItems).filter(
+          key => key.startsWith(CACHE_KEYS.whitelist) || key.startsWith(CACHE_KEYS.teamPolicies)
+        );
+        if (staleKeys.length > 0) {
+          await storage.remove(staleKeys);
+        }
+      } catch {
+        // Best-effort cleanup
+      }
+    }
   }
 
   /**
