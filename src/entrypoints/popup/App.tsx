@@ -72,16 +72,25 @@ export default function PopupApp() {
       const apiClient = initializeApiClient(authToken);
       const result = await apiClient.validateToken();
 
+      if (!result.valid) {
+        // Token is invalid — try a silent refresh before showing a warning
+        try {
+          const refreshResult = await apiClient.refreshToken();
+          await storage.setItem('local:authToken', refreshResult.token);
+          initializeApiClient(refreshResult.token);
+          console.log('Token refreshed automatically on popup open');
+          setState(prev => ({ ...prev, tokenValid: true, tokenError: undefined }));
+          return;
+        } catch (refreshError) {
+          console.warn('Auto-refresh failed:', refreshError);
+        }
+      }
+
       setState(prev => ({
         ...prev,
         tokenValid: result.valid,
         tokenError: result.error,
       }));
-
-      // If token is invalid, show a warning banner
-      if (!result.valid) {
-        console.warn('Auto-validation failed:', result.error);
-      }
     } catch (error) {
       console.error('Auto-validation error:', error);
       setState(prev => ({
@@ -397,13 +406,30 @@ export default function PopupApp() {
       if (result.valid) {
         alert('✓ Connection successful! Your authentication token is valid.');
       } else {
-        // Prompt for re-authentication
+        // Try refreshing first before asking the user to sign in
+        try {
+          setState(prev => ({ ...prev, tokenValid: undefined, tokenError: 'Refreshing token…' }));
+          const refreshResult = await apiClient.refreshToken();
+          await storage.setItem('local:authToken', refreshResult.token);
+          initializeApiClient(refreshResult.token);
+          setState(prev => ({ ...prev, tokenValid: true, tokenError: undefined }));
+          alert('✓ Token refreshed! Your session has been renewed automatically.');
+          return;
+        } catch (refreshError) {
+          console.warn('Token refresh failed during test:', refreshError);
+        }
+
+        // Refresh failed — prompt re-authentication
+        setState(prev => ({
+          ...prev,
+          tokenValid: false,
+          tokenError: result.error,
+        }));
         const shouldReauth = confirm(
           `✗ Connection failed: ${result.error || 'Unknown error'}\n\n` +
-          'Your authentication token is invalid or expired.\n\n' +
+          'Your token could not be refreshed automatically.\n\n' +
           'Would you like to sign in again now?'
         );
-        
         if (shouldReauth) {
           await promptReAuthentication();
         }
@@ -415,12 +441,11 @@ export default function PopupApp() {
         tokenValid: false,
         tokenError: error instanceof Error ? error.message : 'Unknown error',
       }));
-      
+
       const shouldReauth = confirm(
         `✗ Connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
         'Would you like to sign in again now?'
       );
-      
       if (shouldReauth) {
         await promptReAuthentication();
       }

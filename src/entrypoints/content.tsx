@@ -1417,16 +1417,33 @@ export default defineContentScript({
         if (
           error.message?.includes('Invalid authentication') ||
           error.message?.includes('authentication token') ||
-          error.message?.includes('Unauthorized')
+          error.message?.includes('Unauthorized') ||
+          error.message?.includes('Token expired')
         ) {
           lastAuthError = error.message || 'Invalid authentication token';
-          console.error(
-            '⚠️ Authentication Error: Your API key may be invalid or expired.\n' +
-            'To fix this:\n' +
-            '1. Open the PasteProof extension popup\n' +
-            '2. Click "Test Connection" to verify your API key\n' +
-            '3. If invalid, sign out and sign back in'
-          );
+
+          // Attempt a silent token refresh so the next scan works without user action
+          try {
+            const currentToken = await storage.getItem<string>('local:authToken');
+            const currentClient = getApiClient();
+            if (currentToken && currentClient) {
+              const refreshResult = await currentClient.refreshToken();
+              await storage.setItem('local:authToken', refreshResult.token);
+              authToken = refreshResult.token;
+              initializeApiClient(refreshResult.token);
+              lastAuthError = null;
+              console.log('🔄 Token refreshed automatically — next scan will work');
+            }
+          } catch (refreshError) {
+            console.warn('Auto token refresh failed:', refreshError);
+            console.error(
+              '⚠️ Authentication Error: Your API key may be invalid or expired.\n' +
+              'To fix this:\n' +
+              '1. Open the PasteProof extension popup\n' +
+              '2. Click "Test Connection" to refresh or verify your API key\n' +
+              '3. If refresh fails, sign out and sign back in'
+            );
+          }
         } else if (
           error.message?.includes('Premium subscription required') ||
           error.message?.includes('Rate limit exceeded')

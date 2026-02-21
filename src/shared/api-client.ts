@@ -548,6 +548,15 @@ export class PasteProofApiClient {
     return this.fetch('/v1/user');
   }
 
+  // Refresh authentication token - accepts expired tokens and issues a new one
+  async refreshToken(): Promise<{
+    token: string;
+    expiresAt: string;
+    expiresIn: number;
+  }> {
+    return this.fetch('/v1/auth/token/refresh', { method: 'POST' });
+  }
+
   // Validate authentication token
   async validateToken(): Promise<{
     valid: boolean;
