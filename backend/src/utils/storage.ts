@@ -53,6 +53,19 @@ export async function addPattern(env: ENV, pattern: Omit<CustomPattern, 'id' | '
 	return newPattern;
 }
 
+export async function updatePattern(
+	env: ENV,
+	patternId: string,
+	updates: Partial<Omit<CustomPattern, 'id' | 'created_at'>>,
+): Promise<CustomPattern | null> {
+	const patterns = await getPatterns(env);
+	const index = patterns.findIndex((p) => p.id === patternId);
+	if (index === -1) return null;
+	patterns[index] = { ...patterns[index], ...updates };
+	await env.PATTERNS_STORE.put(USER_ID, JSON.stringify(patterns));
+	return patterns[index];
+}
+
 export async function deletePattern(env: ENV, patternId: string): Promise<boolean> {
 	const patterns = await getPatterns(env);
 	const filtered = patterns.filter((p) => p.id !== patternId);

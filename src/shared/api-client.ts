@@ -319,27 +319,35 @@ export class PasteProofApiClient {
   }
 
   // Site Safety Scan
-  async scanUrl(request: SiteScanRequest): Promise<SiteScanResult> {
-    // Validate URL
+  // Returns null when the endpoint is unavailable (e.g. self-hosted backends
+  // that don't implement /v1/scan). Callers should treat null as "no result".
+  async scanUrl(request: SiteScanRequest): Promise<SiteScanResult | null> {
     if (!request.url || typeof request.url !== 'string') {
-      throw new Error('Invalid URL: must be a non-empty string');
+      console.warn('scanUrl: invalid URL argument');
+      return null;
     }
 
     try {
       new URL(request.url);
     } catch {
-      throw new Error('Invalid URL format');
+      console.warn('scanUrl: malformed URL', request.url);
+      return null;
     }
 
-    const data = await this.fetch<SiteScanResult>('/v1/scan', {
-      method: 'POST',
-      body: JSON.stringify({
-        url: request.url,
-        meta: request.meta,
-        deep_analysis: request.deep_analysis ?? false,
-      }),
-    });
-    return data;
+    try {
+      const data = await this.fetch<SiteScanResult>('/v1/scan', {
+        method: 'POST',
+        body: JSON.stringify({
+          url: request.url,
+          meta: request.meta,
+          deep_analysis: request.deep_analysis ?? false,
+        }),
+      });
+      return data;
+    } catch (error) {
+      console.warn('scanUrl: endpoint unavailable, skipping site safety scan:', error);
+      return null;
+    }
   }
 
   // AI Context Analysis

@@ -273,7 +273,107 @@ All endpoints require authentication via `X-API-Key` header.
 
 - `GET /v1/patterns` - Get all custom patterns
 - `POST /v1/patterns` - Create a new pattern
+- `PUT /v1/patterns/:id` - Update an existing pattern (partial update)
 - `DELETE /v1/patterns/:id` - Delete a pattern
+
+#### Pattern CRUD examples
+
+**List all patterns**
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  https://your-worker.workers.dev/v1/patterns
+```
+
+Response:
+
+```json
+{
+  "patterns": [
+    {
+      "id": "a1b2c3d4-...",
+      "name": "Internal employee ID",
+      "pattern": "EMP-\\d{6}",
+      "pattern_type": "INTERNAL_ID",
+      "description": "Matches internal employee numbers",
+      "created_at": "2026-01-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+**Create a pattern**
+
+```bash
+curl -X POST \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Internal employee ID","pattern":"EMP-\\d{6}","pattern_type":"INTERNAL_ID","description":"Matches internal employee numbers"}' \
+  https://your-worker.workers.dev/v1/patterns
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "pattern": {
+    "id": "a1b2c3d4-...",
+    "name": "Internal employee ID",
+    "pattern": "EMP-\\d{6}",
+    "pattern_type": "INTERNAL_ID",
+    "description": "Matches internal employee numbers",
+    "created_at": "2026-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Update a pattern** — all fields are optional, only supplied fields are changed
+
+```bash
+# Step 1: fetch current patterns to get the ID
+PATTERN_ID=$(curl -s \
+  -H "X-API-Key: your-api-key" \
+  https://your-worker.workers.dev/v1/patterns \
+  | jq -r '.patterns[0].id')
+
+# Step 2: update the pattern (change the regex and description)
+curl -X PUT \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"pattern":"EMP-\\d{7}","description":"Updated to 7-digit employee numbers"}' \
+  https://your-worker.workers.dev/v1/patterns/$PATTERN_ID
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "pattern": {
+    "id": "a1b2c3d4-...",
+    "name": "Internal employee ID",
+    "pattern": "EMP-\\d{7}",
+    "pattern_type": "INTERNAL_ID",
+    "description": "Updated to 7-digit employee numbers",
+    "created_at": "2026-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Delete a pattern**
+
+```bash
+curl -X DELETE \
+  -H "X-API-Key: your-api-key" \
+  https://your-worker.workers.dev/v1/patterns/$PATTERN_ID
+```
+
+Response:
+
+```json
+{ "success": true }
+```
 
 ### Detections
 

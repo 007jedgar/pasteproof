@@ -14,6 +14,7 @@ import {
   isWhitelisted,
   getPatterns,
   addPattern,
+  updatePattern,
   deletePattern,
   addDetection,
   addDetectionsBatch,
@@ -36,6 +37,41 @@ app.get('/v1/health', c => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     message: 'Paste Proof Backend is running',
+  });
+});
+
+// ============================================================
+// Auth endpoints (no API key required — work before middleware)
+// ============================================================
+
+// Validate any token/key without requiring it to be currently valid.
+// Self-hosted keys are static and never expire, so any key that matches
+// API_KEY is valid; anything else is not.
+app.post('/v1/auth/token/validate', async c => {
+  const env = c.env;
+
+  // Accept key from header or JSON body so callers don't need extra setup.
+  let key: string | null = c.req.header('X-API-Key') || null;
+  if (!key) {
+    try {
+      const body = await c.req.json<{ token?: string }>();
+      key = body?.token || null;
+    } catch {
+      // no body — key stays null
+    }
+  }
+
+  if (!key) {
+    return c.json({ valid: false, error: 'No token provided' }, 400);
+  }
+
+  const isValid = key === env.API_KEY;
+  return c.json({
+    valid: isValid,
+    isExpired: false,            // Self-hosted keys never expire
+    expiresAt: null,
+    type: 'api_key',
+    ...(isValid ? {} : { error: 'Invalid API key', code: 'INVALID_TOKEN' }),
   });
 });
 
@@ -186,6 +222,49 @@ app.post('/v1/patterns', async c => {
   } catch (error) {
     console.error('Error creating pattern:', error);
     return c.json({ error: 'Failed to create pattern' }, 500);
+  }
+});
+
+app.put('/v1/patterns/:patternId', async c => {
+  try {
+    const patternId = c.req.param('patternId');
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(patternId)) {
+      return c.json({ error: 'Invalid pattern ID format' }, 400);
+    }
+
+    const body = await c.req.json<{
+      name?: string;
+      pattern?: string;
+      pattern_type?: string;
+      description?: string;
+    }>();
+
+    // Validate regex if a new pattern string was supplied
+    if (body.pattern !== undefined) {
+      try {
+        new RegExp(body.pattern);
+      } catch {
+        return c.json({ error: 'Invalid regex pattern' }, 400);
+      }
+    }
+
+    const updated = await updatePattern(c.env, patternId, {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.pattern !== undefined && { pattern: body.pattern }),
+      ...(body.pattern_type !== undefined && { pattern_type: body.pattern_type }),
+      ...(body.description !== undefined && { description: body.description }),
+    });
+
+    if (!updated) {
+      return c.json({ error: 'Pattern not found' }, 404);
+    }
+
+    return c.json({ success: true, pattern: updated });
+  } catch (error) {
+    console.error('Error updating pattern:', error);
+    return c.json({ error: 'Failed to update pattern' }, 500);
   }
 });
 
@@ -436,6 +515,39 @@ app.get('/v1/user', async c => {
     email: user.email,
     subscription_tier: user.subscription_tier,
     subscription_status: user.subscription_status,
+  });
+});
+
+// ============================================================
+// Auth token endpoints (behind auth middleware)
+// ============================================================
+
+// Return metadata about the current key.
+// Self-hosted keys are static and permanent — they never expire.
+app.get('/v1/auth/token/info', c => {
+  return c.json({
+    isExpired: false,
+    expiresAt: null,       // null = permanent
+    expiresIn: null,
+    shouldRefresh: false,
+    type: 'api_key',
+    note: 'Self-hosted API keys are permanent. Rotate by updating API_KEY in your environment and redeploying.',
+  });
+});
+
+// "Refresh" the token. For self-hosted instances the key is static, so this
+// endpoint simply confirms it is valid and returns the same key. The extension
+// treats the returned `token` field as the new value to store, which keeps
+// local:authToken in sync without requiring the user to sign in again.
+app.post('/v1/auth/token/refresh', c => {
+  const apiKey = c.req.header('X-API-Key')!;
+  return c.json({
+    token: apiKey,
+    expiresAt: null,   // permanent — no expiry
+    expiresIn: null,
+    isExpired: false,
+    type: 'api_key',
+    note: 'Self-hosted API keys do not expire. The same key has been returned.',
   });
 });
 
