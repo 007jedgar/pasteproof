@@ -11,8 +11,9 @@ import {
   initializeApiClient,
   type TeamPolicy,
   type SiteScanResult,
+  type DataPolicyValidateResult,
 } from '@/shared/api-client';
-import { SimpleWarningBadge, SiteSafetyWarning } from '@/shared/components';
+import { SimpleWarningBadge, SiteSafetyWarning, DataPolicyWarning, DataPolicyInfoBadge } from '@/shared/components';
 import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
 import { siteScanOptimizer } from '@/shared/site-scan-optimizer';
 import { startAiScan, completeAiScan, failAiScan } from '@/shared/ai-scan-state';
@@ -269,6 +270,12 @@ export default defineContentScript({
     let siteScanInProgress = false;
     let siteScanDismissed = false; // User chose to proceed despite warning
 
+    // Data policy upload validation state
+    let dataPolicyContainer: HTMLDivElement | null = null;
+    let dataPolicyRoot: Root | null = null;
+    const fileInputBadges = new Map<HTMLInputElement, { container: HTMLElement; root: Root }>();
+    const fileInputBadgesPending = new Set<HTMLInputElement>();
+
     // Restore ignore list from background (persists across navigations in same tab)
     try {
       const savedValues: string[] = await browser.runtime.sendMessage({ action: 'getIgnoredValues' });
@@ -476,6 +483,188 @@ export default defineContentScript({
         showSiteSafetyWarning(result);
       } else if (result) {
         console.log('[Site Safety] Site is SAFE - no warning needed');
+      }
+    };
+
+    // ── Data Policy Upload Validation ──────────────────────────────────────
+
+    const removeDataPolicyWarning = () => {
+      if (dataPolicyRoot) {
+        dataPolicyRoot.unmount();
+        dataPolicyRoot = null;
+      }
+      if (dataPolicyContainer) {
+        dataPolicyContainer.remove();
+        dataPolicyContainer = null;
+      }
+    };
+
+    const showDataPolicyWarning = (
+      result: DataPolicyValidateResult,
+      fileName: string,
+      onProceed: () => void
+    ) => {
+      removeDataPolicyWarning(); // dismiss any previous warning first
+
+      dataPolicyContainer = document.createElement('div');
+      dataPolicyContainer.id = 'pasteproof-data-policy-warning';
+      document.body.appendChild(dataPolicyContainer);
+
+      dataPolicyRoot = ReactDOM.createRoot(dataPolicyContainer);
+      dataPolicyRoot.render(
+        <DataPolicyWarning
+          result={result}
+          fileName={fileName}
+          onDismiss={removeDataPolicyWarning}
+          onProceed={() => {
+            removeDataPolicyWarning();
+            onProceed();
+          }}
+        />
+      );
+    };
+
+    const performDataPolicyValidation = async (file: File): Promise<void> => {
+      const teamId = await getCurrentTeamId();
+      if (!teamId) return;
+
+      const apiClient = getApiClient();
+      if (!apiClient) return;
+
+      const domain = window.location.hostname;
+      const fileType = file.name.split('.').pop()?.toLowerCase();
+      const fileSizeMb = Math.round((file.size / (1024 * 1024)) * 100) / 100;
+
+      try {
+        const result = await apiClient.validateUpload(teamId, {
+          domain,
+          ...(fileType ? { file_type: fileType } : {}),
+          file_size_mb: fileSizeMb,
+        });
+
+        if (!result) return;
+
+        // Show warning for any violations or policies with actionable instructions
+        if (result.violations.length > 0 || result.applicable_policies.length > 0) {
+          showDataPolicyWarning(result, file.name, () => {
+            // User acknowledged warning and chose to proceed — upload continues
+          });
+        }
+      } catch {
+        // Silently ignored — self-hosted backends may not implement this endpoint
+      }
+    };
+
+    const handleFileInputChange = async (event: Event) => {
+      const input = event.target as HTMLInputElement;
+      if (!input.files || input.files.length === 0) return;
+      for (let i = 0; i < input.files.length; i++) {
+        await performDataPolicyValidation(input.files[i]);
+      }
+    };
+
+    const attachFileInputListeners = (root: Element | Document = document) => {
+      root.querySelectorAll('input[type="file"]').forEach(el => {
+        if (!(el as any).__ppDataPolicyListener) {
+          el.addEventListener('change', handleFileInputChange);
+          (el as any).__ppDataPolicyListener = true;
+        }
+        showDataPolicyInfoBadge(el as HTMLInputElement);
+      });
+    };
+
+    const removeAllDataPolicyInfoBadges = () => {
+      fileInputBadges.forEach(({ container, root }) => {
+        root.unmount();
+        container.remove();
+      });
+      fileInputBadges.clear();
+      fileInputBadgesPending.clear();
+    };
+
+    /**
+     * Finds the best visible anchor element to place the info badge next to.
+     * Many sites hide <input type="file"> and use a styled label/button as the
+     * actual visible upload trigger.
+     */
+    const findUploadAnchor = (fileInput: HTMLInputElement): Element => {
+      // 1. Prefer an explicit <label for="..."> pointing at this input
+      if (fileInput.id) {
+        const label = document.querySelector(`label[for="${CSS.escape(fileInput.id)}"]`);
+        if (label) return label;
+      }
+
+      // 2. If the input itself is reasonably visible, use it directly
+      const style = window.getComputedStyle(fileInput);
+      const rect = fileInput.getBoundingClientRect();
+      const isHidden =
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.opacity === '0' ||
+        rect.width === 0 ||
+        rect.height === 0;
+      if (!isHidden) return fileInput;
+
+      // 3. Walk up to find the nearest visible ancestor that looks like an upload container
+      let el: HTMLElement | null = fileInput.parentElement;
+      while (el && el !== document.body) {
+        const s = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        if (
+          s.display !== 'none' &&
+          s.visibility !== 'hidden' &&
+          r.width > 0 &&
+          r.height > 0
+        ) {
+          return el;
+        }
+        el = el.parentElement;
+      }
+
+      // Fallback to the input itself
+      return fileInput;
+    };
+
+    const showDataPolicyInfoBadge = async (fileInput: HTMLInputElement) => {
+      if (fileInputBadges.has(fileInput) || fileInputBadgesPending.has(fileInput)) return;
+
+      const apiClient = getApiClient();
+      if (!apiClient) return;
+
+      fileInputBadgesPending.add(fileInput);
+      try {
+        const teamId = await getCurrentTeamId();
+        if (!teamId) return;
+
+        const result = await apiClient.validateUpload(teamId, {
+          domain: window.location.hostname,
+        });
+
+        // Only show badge if this domain has active policies or violations
+        if (!result || (result.applicable_policies.length === 0 && result.violations.length === 0)) return;
+
+        // Guard against duplicate in case two calls raced
+        if (fileInputBadges.has(fileInput)) return;
+
+        const container = document.createElement('span');
+        container.setAttribute('data-pasteproof-policy-badge', '');
+        container.style.cssText = 'display:inline-flex;align-items:center;vertical-align:middle;';
+
+        const anchor = findUploadAnchor(fileInput);
+        anchor.insertAdjacentElement('afterend', container);
+
+        const root = ReactDOM.createRoot(container);
+        root.render(
+          <DataPolicyInfoBadge
+            applicablePolicies={result.applicable_policies}
+            violations={result.violations}
+          />
+        );
+        fileInputBadges.set(fileInput, { container, root });
+      } catch {
+        // Silently skip
+      } finally {
+        fileInputBadgesPending.delete(fileInput);
       }
     };
 
@@ -1937,6 +2126,30 @@ export default defineContentScript({
       }
     };
 
+    // Attach data-policy listeners to file inputs already on the page,
+    // then watch for dynamically added ones via MutationObserver.
+    attachFileInputListeners();
+    const fileInputObserver = new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element) {
+            if (
+              node.tagName === 'INPUT' &&
+              (node as HTMLInputElement).type === 'file' &&
+              !(node as any).__ppDataPolicyListener
+            ) {
+              node.addEventListener('change', handleFileInputChange);
+              (node as any).__ppDataPolicyListener = true;
+              showDataPolicyInfoBadge(node as HTMLInputElement);
+            }
+            // Also scan descendants of the added element
+            attachFileInputListeners(node);
+          }
+        }
+      }
+    });
+    fileInputObserver.observe(document.body, { childList: true, subtree: true });
+
     // Context menu setup
     document.addEventListener('contextmenu', event => {
       const target = event.target as HTMLElement;
@@ -2081,6 +2294,9 @@ export default defineContentScript({
     ctx.onInvalidated(() => {
       removeAllIndicators();
       removeSiteSafetyWarning();
+      removeDataPolicyWarning();
+      removeAllDataPolicyInfoBadges();
+      fileInputObserver.disconnect();
       aiScanOptimizer.clearCache();
       siteScanOptimizer.clearCache();
       detectionQueue.flush();

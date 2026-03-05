@@ -119,6 +119,67 @@ export type TeamPolicy = {
   updated_at: number | string;
 };
 
+export type DataPolicyViolation = {
+  policy_id: string;
+  policy_name: string;
+  violation_type:
+    | 'blocked_domain'
+    | 'unlisted_domain'
+    | 'disallowed_file_type'
+    | 'file_too_large';
+  message: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+};
+
+export type DataPolicyApplicablePolicy = {
+  id: string;
+  name: string;
+  pii_action: string;
+  pii_checks: string[];
+  sensitivity_level: string;
+  require_approval: boolean;
+  approver_emails: string[];
+  user_instructions?: string | null;
+};
+
+export type DataPolicyValidateResult = {
+  allowed: boolean;
+  violations: DataPolicyViolation[];
+  applicable_policies: DataPolicyApplicablePolicy[];
+  message: string;
+};
+
+export type DataPolicy = {
+  id: string;
+  team_id: string;
+  name: string;
+  description?: string | null;
+  enabled: boolean;
+  allowed_domains: string[];
+  blocked_domains: string[];
+  allow_unlisted_domains: boolean;
+  pii_checks: string[];
+  pii_action: 'block' | 'warn' | 'redact_and_allow' | 'log_only';
+  pii_confidence_threshold: number;
+  require_approval: boolean;
+  approver_emails: string[];
+  approval_timeout_hours: number;
+  allowed_file_types: string[];
+  max_file_size_mb: number;
+  sensitivity_level: 'public' | 'internal' | 'confidential' | 'restricted';
+  require_watermark: boolean;
+  watermark_text?: string | null;
+  retention_days?: number | null;
+  auto_expire_uploads: boolean;
+  notify_on_violation: boolean;
+  notification_emails: string[];
+  notify_slack_channel?: string | null;
+  user_instructions?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export class PasteProofApiClient {
   private apiKey: string;
   private baseUrl: string;
@@ -178,9 +239,12 @@ export class PasteProofApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    // Validate and sanitize endpoint
-    const safeEndpoint = this.validateEndpoint(endpoint);
-    const url = `${this.baseUrl}${safeEndpoint}`;
+    // Validate path separately so query strings are preserved in the final URL
+    const qIdx = endpoint.indexOf('?');
+    const rawPath = qIdx >= 0 ? endpoint.slice(0, qIdx) : endpoint;
+    const queryString = qIdx >= 0 ? endpoint.slice(qIdx) : '';
+    const safeEndpoint = this.validateEndpoint(rawPath);
+    const url = `${this.baseUrl}${safeEndpoint}${queryString}`;
 
     const response = await fetch(url, {
       ...options,
@@ -685,6 +749,113 @@ export class PasteProofApiClient {
     } catch (error) {
       console.warn('Failed to fetch team policies:', error);
       return [];
+    }
+  }
+
+  // ── Data Policy methods ────────────────────────────────────────────────────
+
+  async getDataPolicies(
+    teamId: string,
+    includeDisabled = false
+  ): Promise<DataPolicy[]> {
+    try {
+      const safeId = this.validateId(teamId);
+      const qs = includeDisabled ? '?include_disabled=true' : '';
+      const data = await this.fetch<{ policies: DataPolicy[] }>(
+        `/v1/teams/${safeId}/data-policies${qs}`
+      );
+      return data.policies;
+    } catch (error) {
+      console.warn('Failed to fetch data policies:', error);
+      return [];
+    }
+  }
+
+  async getDataPolicy(
+    teamId: string,
+    policyId: string
+  ): Promise<DataPolicy | null> {
+    try {
+      const safeTeamId = this.validateId(teamId);
+      const safePolicyId = this.validateId(policyId);
+      const data = await this.fetch<{ policy: DataPolicy }>(
+        `/v1/teams/${safeTeamId}/data-policies/${safePolicyId}`
+      );
+      return data.policy;
+    } catch (error) {
+      console.warn('Failed to fetch data policy:', error);
+      return null;
+    }
+  }
+
+  async createDataPolicy(
+    teamId: string,
+    policy: { name: string } & Partial<
+      Omit<DataPolicy, 'id' | 'team_id' | 'created_by' | 'created_at' | 'updated_at'>
+    >
+  ): Promise<DataPolicy | null> {
+    try {
+      const safeId = this.validateId(teamId);
+      const data = await this.fetch<{ policy: DataPolicy }>(
+        `/v1/teams/${safeId}/data-policies`,
+        { method: 'POST', body: JSON.stringify(policy) }
+      );
+      return data.policy;
+    } catch (error) {
+      console.warn('Failed to create data policy:', error);
+      return null;
+    }
+  }
+
+  async updateDataPolicy(
+    teamId: string,
+    policyId: string,
+    updates: Partial<
+      Omit<DataPolicy, 'id' | 'team_id' | 'created_by' | 'created_at' | 'updated_at'>
+    >
+  ): Promise<DataPolicy | null> {
+    try {
+      const safeTeamId = this.validateId(teamId);
+      const safePolicyId = this.validateId(policyId);
+      const data = await this.fetch<{ policy: DataPolicy }>(
+        `/v1/teams/${safeTeamId}/data-policies/${safePolicyId}`,
+        { method: 'PUT', body: JSON.stringify(updates) }
+      );
+      return data.policy;
+    } catch (error) {
+      console.warn('Failed to update data policy:', error);
+      return null;
+    }
+  }
+
+  async deleteDataPolicy(teamId: string, policyId: string): Promise<boolean> {
+    try {
+      const safeTeamId = this.validateId(teamId);
+      const safePolicyId = this.validateId(policyId);
+      await this.fetch(
+        `/v1/teams/${safeTeamId}/data-policies/${safePolicyId}`,
+        { method: 'DELETE' }
+      );
+      return true;
+    } catch (error) {
+      console.warn('Failed to delete data policy:', error);
+      return false;
+    }
+  }
+
+  async validateUpload(
+    teamId: string,
+    data: { domain: string; file_type?: string; file_size_mb?: number }
+  ): Promise<DataPolicyValidateResult | null> {
+    try {
+      const safeId = this.validateId(teamId);
+      return await this.fetch<DataPolicyValidateResult>(
+        `/v1/teams/${safeId}/data-policies/validate`,
+        { method: 'POST', body: JSON.stringify(data) }
+      );
+    } catch {
+      // Silently ignored — self-hosted backends may not implement this endpoint
+      return null;
     }
   }
 }
