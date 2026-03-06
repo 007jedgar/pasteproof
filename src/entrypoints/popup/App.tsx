@@ -6,6 +6,7 @@ import {
   getApiBaseUrl,
   apiCache,
   type Team,
+  type SiteScanResult,
 } from '@/shared/api-client';
 import LockIcon from '@mui/icons-material/Lock';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -16,7 +17,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SecurityIcon from '@mui/icons-material/Security';
-import WifiIcon from '@mui/icons-material/Wifi';
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import GppBadIcon from '@mui/icons-material/GppBad';
 
 type User = {
   id: string;
@@ -29,11 +32,10 @@ type PopupState = {
   enabled: boolean;
   autoAiScan: boolean;
   currentDomain: string;
+  currentUrl: string;
   isWhitelisted: boolean;
   hasApiKey: boolean;
   user?: User;
-  tokenValid?: boolean;
-  tokenError?: string;
 };
 
 export default function PopupApp() {
@@ -42,64 +44,20 @@ export default function PopupApp() {
     enabled: true,
     autoAiScan: false,
     currentDomain: '',
+    currentUrl: '',
     isWhitelisted: false,
     hasApiKey: false,
-    tokenValid: undefined,
-    tokenError: undefined,
   });
   const [loading, setLoading] = useState(true);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [siteScan, setSiteScan] = useState<SiteScanResult | null>(null);
+  const [siteScanLoading, setSiteScanLoading] = useState(false);
 
   useEffect(() => {
     loadState();
     loadUserTeams();
   }, []);
-
-  // Auto-validate token when popup opens (for authenticated users)
-  useEffect(() => {
-    if (state.isAuthenticated && state.tokenValid === undefined) {
-      // Auto-validate token in the background
-      autoValidateToken();
-    }
-  }, [state.isAuthenticated]);
-
-  const autoValidateToken = async () => {
-    try {
-      const authToken = await storage.getItem<string>('local:authToken');
-      if (!authToken) return;
-
-      const apiClient = initializeApiClient(authToken);
-      const result = await apiClient.validateToken();
-
-      if (!result.valid) {
-        // Token is invalid — try a silent refresh before showing a warning
-        try {
-          const refreshResult = await apiClient.refreshToken();
-          await storage.setItem('local:authToken', refreshResult.token);
-          initializeApiClient(refreshResult.token);
-          console.log('Token refreshed automatically on popup open');
-          setState(prev => ({ ...prev, tokenValid: true, tokenError: undefined }));
-          return;
-        } catch (refreshError) {
-          console.warn('Auto-refresh failed:', refreshError);
-        }
-      }
-
-      setState(prev => ({
-        ...prev,
-        tokenValid: result.valid,
-        tokenError: result.error,
-      }));
-    } catch (error) {
-      console.error('Auto-validation error:', error);
-      setState(prev => ({
-        ...prev,
-        tokenValid: false,
-        tokenError: error instanceof Error ? error.message : 'Unknown error',
-      }));
-    }
-  };
 
   const loadUserTeams = async () => {
     try {
@@ -193,8 +151,6 @@ export default function PopupApp() {
               }
             } catch (scriptError) {
               console.log('Scripting API error (may be Firefox):', scriptError);
-              // Firefox fallback: try using tabs.executeScript for older versions
-              // Modern Firefox should support scripting API with proper permissions
             }
           }
         } catch (err) {
@@ -218,6 +174,7 @@ export default function PopupApp() {
         enabled,
         autoAiScan,
         currentDomain: domain,
+        currentUrl: tab.url || '',
         isWhitelisted,
         hasApiKey: isAuthenticated,
       });
@@ -226,10 +183,29 @@ export default function PopupApp() {
       if (isAuthenticated) {
         loadUserTeams();
       }
+
+      // Run site safety scan if authenticated
+      if (isAuthenticated && authToken && tab.url) {
+        runSiteScan(authToken, tab.url);
+      }
     } catch (error) {
       console.error('Failed to load popup state:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runSiteScan = async (authToken: string, url: string) => {
+    setSiteScanLoading(true);
+    try {
+      const apiClient = initializeApiClient(authToken);
+      const result = await apiClient.scanUrl({ url });
+      setSiteScan(result);
+    } catch (error) {
+      console.error('Site scan failed:', error);
+      setSiteScan(null);
+    } finally {
+      setSiteScanLoading(false);
     }
   };
 
@@ -283,6 +259,7 @@ export default function PopupApp() {
     // Clear team state
     setCurrentTeamId(null);
     setTeams([]);
+    setSiteScan(null);
 
     // Refresh the page after signing out
     await refreshCurrentTab();
@@ -379,109 +356,6 @@ export default function PopupApp() {
     browser.tabs.create({ url: `${import.meta.env.VITE_WEB_URL}/dashboard` });
   };
 
-  const testConnection = async () => {
-    try {
-      setState(prev => ({ ...prev, tokenValid: undefined, tokenError: undefined }));
-      
-      const authToken = await storage.getItem<string>('local:authToken');
-      if (!authToken) {
-        setState(prev => ({
-          ...prev,
-          tokenValid: false,
-          tokenError: 'No authentication token found',
-        }));
-        return;
-      }
-
-      const apiClient = initializeApiClient(authToken);
-      const result = await apiClient.validateToken();
-
-      setState(prev => ({
-        ...prev,
-        tokenValid: result.valid,
-        tokenError: result.error,
-        user: result.user || prev.user,
-      }));
-
-      if (result.valid) {
-        alert('✓ Connection successful! Your authentication token is valid.');
-      } else {
-        // Try refreshing first before asking the user to sign in
-        try {
-          setState(prev => ({ ...prev, tokenValid: undefined, tokenError: 'Refreshing token…' }));
-          const refreshResult = await apiClient.refreshToken();
-          await storage.setItem('local:authToken', refreshResult.token);
-          initializeApiClient(refreshResult.token);
-          setState(prev => ({ ...prev, tokenValid: true, tokenError: undefined }));
-          alert('✓ Token refreshed! Your session has been renewed automatically.');
-          return;
-        } catch (refreshError) {
-          console.warn('Token refresh failed during test:', refreshError);
-        }
-
-        // Refresh failed — prompt re-authentication
-        setState(prev => ({
-          ...prev,
-          tokenValid: false,
-          tokenError: result.error,
-        }));
-        const shouldReauth = confirm(
-          `✗ Connection failed: ${result.error || 'Unknown error'}\n\n` +
-          'Your token could not be refreshed automatically.\n\n' +
-          'Would you like to sign in again now?'
-        );
-        if (shouldReauth) {
-          await promptReAuthentication();
-        }
-      }
-    } catch (error) {
-      console.error('Failed to test connection:', error);
-      setState(prev => ({
-        ...prev,
-        tokenValid: false,
-        tokenError: error instanceof Error ? error.message : 'Unknown error',
-      }));
-
-      const shouldReauth = confirm(
-        `✗ Connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\n` +
-        'Would you like to sign in again now?'
-      );
-      if (shouldReauth) {
-        await promptReAuthentication();
-      }
-    }
-  };
-
-  const promptReAuthentication = async () => {
-    try {
-      // Clear existing auth data
-      await storage.removeItem('local:authToken');
-      await storage.removeItem('local:user');
-      await storage.removeItem('local:currentTeamId');
-      localStorage.removeItem('currentTeamId');
-
-      // Clear API cache
-      await apiCache.clearAll();
-
-      // Open sign-in page
-      const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
-      await browser.tabs.create({
-        url: authUrl,
-        active: true,
-      });
-
-      alert(
-        'Please sign in on the opened tab.\n\n' +
-        'After signing in, reopen this popup to verify your connection.'
-      );
-      
-      window.close();
-    } catch (error) {
-      console.error('Failed to prompt re-authentication:', error);
-      alert('Failed to open sign-in page. Please try again.');
-    }
-  };
-
   if (loading) {
     return (
       <div style={styles.container}>
@@ -539,390 +413,350 @@ export default function PopupApp() {
 
       {state.isAuthenticated && (
         <>
-          {/* Invalid Token Warning Banner */}
-          {state.tokenValid === false && (
-            <div style={styles.warningBanner}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                <LockIcon sx={{ fontSize: 18, color: '#ef4444' }} />
-                <span style={{ fontWeight: '600', fontSize: '13px', color: '#991b1b' }}>
-                  Authentication Issue Detected
-                </span>
-              </div>
-              <div style={{ fontSize: '11px', color: '#7f1d1d', marginBottom: '8px', lineHeight: '1.4' }}>
-                Your authentication token is invalid or expired. Some features may not work.
-              </div>
-              <button
-                onClick={promptReAuthentication}
-                style={{
-                  ...styles.button,
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  fontSize: '12px',
-                  padding: '6px 12px',
-                  width: '100%',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.backgroundColor = '#dc2626';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.backgroundColor = '#ef4444';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <LockIcon sx={{ fontSize: 12, marginRight: '4px' }} />
-                Sign In Again
-              </button>
+          <div
+            style={{
+              ...styles.statusBadge,
+              backgroundColor: state.enabled ? '#ecfdf5' : '#fef2f2',
+            }}
+          >
+            <SecurityIcon
+              sx={{
+                fontSize: 16,
+                color: state.enabled ? '#10b981' : '#ef4444',
+              }}
+            />
+            <span
+              style={{
+                color: state.enabled ? '#065f46' : '#991b1b',
+                fontWeight: '600',
+                fontSize: '13px',
+              }}
+            >
+              {state.enabled ? 'Protection Active' : 'Protection Disabled'}
+            </span>
+          </div>
+
+          <div style={styles.section}>
+            <div style={styles.sectionLabel}>Current Site</div>
+            <div style={styles.domain}>{state.currentDomain}</div>
+          </div>
+
+          {/* Site Safety Section */}
+          {siteScanLoading && (
+            <div style={styles.siteSafetyLoading}>
+              <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                Checking site safety...
+              </span>
             </div>
           )}
 
-          <div
-                style={{
-                  ...styles.statusBadge,
-                  backgroundColor: state.enabled ? '#ecfdf5' : '#fef2f2',
-                }}
-              >
-                <SecurityIcon
-                  sx={{
-                    fontSize: 16,
-                    color: state.enabled ? '#10b981' : '#ef4444',
-                  }}
-                />
-                <span
-                  style={{
-                    color: state.enabled ? '#065f46' : '#991b1b',
-                    fontWeight: '600',
-                    fontSize: '13px',
-                  }}
-                >
-                  {state.enabled ? 'Protection Active' : 'Protection Disabled'}
-                </span>
-              </div>
-
-              <div style={styles.section}>
-                <div style={styles.sectionLabel}>Current Site</div>
-                <div style={styles.domain}>{state.currentDomain}</div>
-              </div>
-
-              {/* Team Selector */}
-              {teams.length > 0 && (
-                <div style={styles.section}>
-                  <div style={styles.sectionLabel}>Team</div>
-                  <select
-                    value={currentTeamId || ''}
-                    onChange={e => handleTeamChange(e.target.value || null)}
-                    style={styles.select}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.borderColor = '#d1d5db';
-                      e.currentTarget.style.backgroundColor = '#ffffff';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
-                    }}
-                    onFocus={e => {
-                      e.currentTarget.style.borderColor = '#ff9800';
-                      e.currentTarget.style.backgroundColor = '#ffffff';
-                      e.currentTarget.style.boxShadow =
-                        '0 0 0 3px rgba(255, 152, 0, 0.1)';
-                    }}
-                    onBlur={e => {
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    <option value="">Personal Account</option>
-                    {teams.map(team => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
+          {!siteScanLoading && siteScan && (
+            <>
+              {siteScan.verdict === 'SAFE' && (
+                <div style={styles.siteSafeBadge}>
+                  <VerifiedUserIcon sx={{ fontSize: 16, color: '#065f46' }} />
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '12px', color: '#065f46' }}>
+                      Site Verified
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#047857' }}>
+                      No threats detected on this site
+                    </div>
+                  </div>
                 </div>
               )}
 
-              <div style={styles.controls}>
-                <button
-                  onClick={toggleEnabled}
-                  style={{ ...styles.button, ...styles.buttonPrimary }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.backgroundColor = '#fb8c00';
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow =
-                      '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.backgroundColor = '#ff9800';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow =
-                      '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
-                  }}
-                >
-                  {state.enabled ? (
-                    <>
-                      <PauseIcon
-                        sx={{
-                          fontSize: 14,
-                          marginRight: '5px',
-                          verticalAlign: 'middle',
-                          lineHeight: 1,
-                        }}
-                      />
-                      Disable Protection
-                    </>
-                  ) : (
-                    <>
-                      <PlayArrowIcon
-                        sx={{
-                          fontSize: 14,
-                          marginRight: '5px',
-                          verticalAlign: 'middle',
-                          lineHeight: 1,
-                        }}
-                      />
-                      Enable Protection
-                    </>
-                  )}
-                </button>
+              {siteScan.verdict === 'SUSPICIOUS' && (
+                <div style={styles.siteSuspiciousBadge}>
+                  <WarningAmberIcon sx={{ fontSize: 16, color: '#92400e' }} />
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '12px', color: '#92400e' }}>
+                      Site Flagged as Suspicious
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#78350f', lineHeight: '1.4' }}>
+                      Proceed with caution — this site may be untrustworthy
+                    </div>
+                    {siteScan.flags.length > 0 && (
+                      <div style={{ fontSize: '10px', color: '#78350f', marginTop: '4px' }}>
+                        Flags: {siteScan.flags.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
-                <button
-                  onClick={toggleWhitelist}
-                  style={{
-                    ...styles.button,
-                    ...(state.isWhitelisted
-                      ? styles.buttonDanger
-                      : styles.buttonSecondary),
-                  }}
-                  onMouseEnter={e => {
-                    if (state.isWhitelisted) {
-                      e.currentTarget.style.backgroundColor = '#dc2626';
-                    } else {
-                      e.currentTarget.style.backgroundColor = '#059669';
-                    }
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow =
-                      '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-                  }}
-                  onMouseLeave={e => {
-                    if (state.isWhitelisted) {
-                      e.currentTarget.style.backgroundColor = '#ef4444';
-                    } else {
-                      e.currentTarget.style.backgroundColor = '#10b981';
-                    }
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow =
-                      '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
-                  }}
-                >
-                  {state.isWhitelisted ? (
-                    <>
-                      <CancelIcon
-                        sx={{
-                          fontSize: 14,
-                          marginRight: '5px',
-                          verticalAlign: 'middle',
-                          lineHeight: 1,
-                        }}
-                      />
-                      Remove from Whitelist
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircleIcon
-                        sx={{
-                          fontSize: 14,
-                          marginRight: '5px',
-                          verticalAlign: 'middle',
-                          lineHeight: 1,
-                        }}
-                      />
-                      Add to Whitelist
-                    </>
-                  )}
-                </button>
-              </div>
+              {siteScan.verdict === 'MALICIOUS' && (
+                <div style={styles.siteMaliciousBadge}>
+                  <GppBadIcon sx={{ fontSize: 20, color: '#7f1d1d', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: '700', fontSize: '13px', color: '#7f1d1d', marginBottom: '3px' }}>
+                      Warning: Potential Scam or Phishing Site
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#991b1b', lineHeight: '1.4' }}>
+                      This site has been identified as potentially malicious. Avoid entering any personal information.
+                    </div>
+                    {siteScan.flags.length > 0 && (
+                      <div style={{ fontSize: '10px', color: '#b91c1c', marginTop: '5px' }}>
+                        Flags: {siteScan.flags.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
-              {/* Auto AI Scan Toggle */}
-              <div style={styles.divider} />
+          {/* Team Selector */}
+          {teams.length > 0 && (
+            <div style={styles.section}>
+              <div style={styles.sectionLabel}>Team</div>
+              <select
+                value={currentTeamId || ''}
+                onChange={e => handleTeamChange(e.target.value || null)}
+                style={styles.select}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = '#d1d5db';
+                  e.currentTarget.style.backgroundColor = '#ffffff';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = '#e5e7eb';
+                  e.currentTarget.style.backgroundColor = '#f9fafb';
+                }}
+                onFocus={e => {
+                  e.currentTarget.style.borderColor = '#ff9800';
+                  e.currentTarget.style.backgroundColor = '#ffffff';
+                  e.currentTarget.style.boxShadow =
+                    '0 0 0 3px rgba(255, 152, 0, 0.1)';
+                }}
+                onBlur={e => {
+                  e.currentTarget.style.borderColor = '#e5e7eb';
+                  e.currentTarget.style.backgroundColor = '#f9fafb';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <option value="">Personal Account</option>
+                {teams.map(team => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-              <div style={styles.section}>
+          <div style={styles.controls}>
+            <button
+              onClick={toggleEnabled}
+              style={{ ...styles.button, ...styles.buttonPrimary }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = '#fb8c00';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow =
+                  '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = '#ff9800';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow =
+                  '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+              }}
+            >
+              {state.enabled ? (
+                <>
+                  <PauseIcon
+                    sx={{
+                      fontSize: 14,
+                      marginRight: '5px',
+                      verticalAlign: 'middle',
+                      lineHeight: 1,
+                    }}
+                  />
+                  Disable Protection
+                </>
+              ) : (
+                <>
+                  <PlayArrowIcon
+                    sx={{
+                      fontSize: 14,
+                      marginRight: '5px',
+                      verticalAlign: 'middle',
+                      lineHeight: 1,
+                    }}
+                  />
+                  Enable Protection
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={toggleWhitelist}
+              style={{
+                ...styles.button,
+                ...(state.isWhitelisted
+                  ? styles.buttonDanger
+                  : styles.buttonSecondary),
+              }}
+              onMouseEnter={e => {
+                if (state.isWhitelisted) {
+                  e.currentTarget.style.backgroundColor = '#dc2626';
+                } else {
+                  e.currentTarget.style.backgroundColor = '#059669';
+                }
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow =
+                  '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+              }}
+              onMouseLeave={e => {
+                if (state.isWhitelisted) {
+                  e.currentTarget.style.backgroundColor = '#ef4444';
+                } else {
+                  e.currentTarget.style.backgroundColor = '#10b981';
+                }
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow =
+                  '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+              }}
+            >
+              {state.isWhitelisted ? (
+                <>
+                  <CancelIcon
+                    sx={{
+                      fontSize: 14,
+                      marginRight: '5px',
+                      verticalAlign: 'middle',
+                      lineHeight: 1,
+                    }}
+                  />
+                  Remove from Whitelist
+                </>
+              ) : (
+                <>
+                  <CheckCircleIcon
+                    sx={{
+                      fontSize: 14,
+                      marginRight: '5px',
+                      verticalAlign: 'middle',
+                      lineHeight: 1,
+                    }}
+                  />
+                  Add to Whitelist
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Auto AI Scan Toggle */}
+          <div style={styles.divider} />
+
+          <div style={styles.section}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div>
                 <div
                   style={{
                     display: 'flex',
-                    justifyContent: 'space-between',
                     alignItems: 'center',
+                    gap: '4px',
+                    marginBottom: '3px',
                   }}
                 >
-                  <div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        marginBottom: '3px',
-                      }}
-                    >
-                      <SmartToyIcon
-                        sx={{
-                          fontSize: 14,
-                          color: '#9c27b0',
-                          marginRight: '3px',
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          color: '#333',
-                        }}
-                      >
-                        Auto AI Scan
-                      </span>
-                      <span
-                        style={{
-                          fontSize: '8px',
-                          backgroundColor: '#9c27b0',
-                          color: 'white',
-                          padding: '1px 4px',
-                          borderRadius: '3px',
-                          fontWeight: '600',
-                        }}
-                      >
-                        PREMIUM
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '10px', color: '#666' }}>
-                      Automatically scan inputs with AI
-                    </div>
-                  </div>
-
-                  <label style={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={state.autoAiScan}
-                      onChange={toggleAutoAiScan}
-                      style={{ opacity: 0, width: 0, height: 0 }}
-                    />
-                    <span
-                      style={{
-                        ...styles.toggleSlider,
-                        backgroundColor: state.autoAiScan ? '#9c27b0' : '#ccc',
-                      }}
-                    >
-                      <span
-                        style={{
-                          ...styles.toggleButton,
-                          left: state.autoAiScan ? '22px' : '2px',
-                        }}
-                      />
-                    </span>
-                  </label>
+                  <SmartToyIcon
+                    sx={{
+                      fontSize: 14,
+                      color: '#9c27b0',
+                      marginRight: '3px',
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: '#333',
+                    }}
+                  >
+                    Auto AI Scan
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '8px',
+                      backgroundColor: '#9c27b0',
+                      color: 'white',
+                      padding: '1px 4px',
+                      borderRadius: '3px',
+                      fontWeight: '600',
+                    }}
+                  >
+                    PREMIUM
+                  </span>
+                </div>
+                <div style={{ fontSize: '10px', color: '#666' }}>
+                  Automatically scan inputs with AI
                 </div>
               </div>
 
-              <div style={styles.divider} />
-
-              <div style={styles.links}>
-                <button
-                  onClick={openDashboard}
-                  style={styles.link}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.backgroundColor = '#f9fafb';
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.backgroundColor = 'white';
-                    e.currentTarget.style.borderColor = '#e5e7eb';
-                  }}
-                >
-                  <DashboardIcon sx={{ fontSize: 14, marginRight: '5px' }} />
-                  Dashboard
-                </button>
-                <button
-                  onClick={signOut}
-                  style={styles.link}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.backgroundColor = '#f9fafb';
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.backgroundColor = 'white';
-                    e.currentTarget.style.borderColor = '#e5e7eb';
-                  }}
-                >
-                  <LogoutIcon sx={{ fontSize: 14, marginRight: '5px' }} />
-                  Sign Out
-                </button>
-              </div>
-
-              {/* Test Connection Button */}
-              <div style={{ marginTop: '8px' }}>
-                <button
-                  onClick={testConnection}
+              <label style={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={state.autoAiScan}
+                  onChange={toggleAutoAiScan}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span
                   style={{
-                    ...styles.link,
-                    width: '100%',
-                    backgroundColor: state.tokenValid === true ? '#ecfdf5' : state.tokenValid === false ? '#fef2f2' : 'white',
-                    borderColor: state.tokenValid === true ? '#10b981' : state.tokenValid === false ? '#ef4444' : '#e5e7eb',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.backgroundColor = state.tokenValid === true ? '#d1fae5' : state.tokenValid === false ? '#fee2e2' : '#f9fafb';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.backgroundColor = state.tokenValid === true ? '#ecfdf5' : state.tokenValid === false ? '#fef2f2' : 'white';
+                    ...styles.toggleSlider,
+                    backgroundColor: state.autoAiScan ? '#9c27b0' : '#ccc',
                   }}
                 >
-                  <WifiIcon sx={{ 
-                    fontSize: 14, 
-                    marginRight: '5px',
-                    color: state.tokenValid === true ? '#10b981' : state.tokenValid === false ? '#ef4444' : '#6b7280'
-                  }} />
-                  <span style={{
-                    color: state.tokenValid === true ? '#065f46' : state.tokenValid === false ? '#991b1b' : '#374151'
-                  }}>
-                    {state.tokenValid === true ? 'Connection OK' : state.tokenValid === false ? 'Connection Failed' : 'Test Connection'}
-                  </span>
-                </button>
-                {state.tokenError && (
-                  <div>
-                    <div style={{
-                      fontSize: '10px',
-                      color: '#ef4444',
-                      marginTop: '4px',
-                      padding: '4px 8px',
-                      backgroundColor: '#fef2f2',
-                      borderRadius: '4px',
-                      border: '1px solid #fee2e2',
-                      marginBottom: '6px',
-                    }}>
-                      {state.tokenError}
-                    </div>
-                    <button
-                      onClick={promptReAuthentication}
-                      style={{
-                        ...styles.button,
-                        backgroundColor: '#ef4444',
-                        color: 'white',
-                        fontSize: '12px',
-                        padding: '6px 12px',
-                        width: '100%',
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = '#dc2626';
-                        e.currentTarget.style.transform = 'translateY(-1px)';
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = '#ef4444';
-                        e.currentTarget.style.transform = 'translateY(0)';
-                      }}
-                    >
-                      <LockIcon sx={{ fontSize: 12, marginRight: '4px' }} />
-                      Sign In Again
-                    </button>
-                  </div>
-                )}
-              </div>
+                  <span
+                    style={{
+                      ...styles.toggleButton,
+                      left: state.autoAiScan ? '22px' : '2px',
+                    }}
+                  />
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div style={styles.divider} />
+
+          <div style={styles.links}>
+            <button
+              onClick={openDashboard}
+              style={styles.link}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = '#f9fafb';
+                e.currentTarget.style.borderColor = '#d1d5db';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'white';
+                e.currentTarget.style.borderColor = '#e5e7eb';
+              }}
+            >
+              <DashboardIcon sx={{ fontSize: 14, marginRight: '5px' }} />
+              Dashboard
+            </button>
+            <button
+              onClick={signOut}
+              style={styles.link}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = '#f9fafb';
+                e.currentTarget.style.borderColor = '#d1d5db';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'white';
+                e.currentTarget.style.borderColor = '#e5e7eb';
+              }}
+            >
+              <LogoutIcon sx={{ fontSize: 14, marginRight: '5px' }} />
+              Sign Out
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -995,6 +829,49 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '6px',
     border: '1px solid #e5e7eb',
     fontFamily: 'monospace',
+  },
+  siteSafetyLoading: {
+    padding: '8px 10px',
+    borderRadius: '6px',
+    marginBottom: '12px',
+    backgroundColor: '#f9fafb',
+    border: '1px solid #e5e7eb',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  siteSafeBadge: {
+    padding: '8px 10px',
+    borderRadius: '6px',
+    marginBottom: '12px',
+    backgroundColor: '#ecfdf5',
+    border: '1px solid #a7f3d0',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+  },
+  siteSuspiciousBadge: {
+    padding: '10px',
+    borderRadius: '6px',
+    marginBottom: '12px',
+    backgroundColor: '#fffbeb',
+    border: '1px solid #fcd34d',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+  },
+  siteMaliciousBadge: {
+    padding: '12px',
+    borderRadius: '8px',
+    marginBottom: '12px',
+    backgroundColor: '#fef2f2',
+    border: '2px solid #fca5a5',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '10px',
+    boxShadow: '0 2px 4px 0 rgba(239, 68, 68, 0.15)',
   },
   controls: {
     display: 'flex',
@@ -1126,13 +1003,5 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: '12px',
     fontSize: '13px',
     lineHeight: '1.4',
-  },
-  warningBanner: {
-    backgroundColor: '#fef2f2',
-    border: '1px solid #fee2e2',
-    borderRadius: '8px',
-    padding: '12px',
-    marginBottom: '12px',
-    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
   },
 };
