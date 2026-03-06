@@ -20,6 +20,7 @@ import SecurityIcon from '@mui/icons-material/Security';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import GppBadIcon from '@mui/icons-material/GppBad';
+import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 
 type User = {
   id: string;
@@ -186,7 +187,7 @@ export default function PopupApp() {
 
       // Run site safety scan if authenticated
       if (isAuthenticated && authToken && tab.url) {
-        runSiteScan(authToken, tab.url);
+        runSiteScan(authToken, tab.url, tab.id);
       }
     } catch (error) {
       console.error('Failed to load popup state:', error);
@@ -195,17 +196,67 @@ export default function PopupApp() {
     }
   };
 
-  const runSiteScan = async (authToken: string, url: string) => {
+  const runSiteScan = async (
+    authToken: string,
+    url: string,
+    tabId?: number
+  ) => {
     setSiteScanLoading(true);
     try {
       const apiClient = initializeApiClient(authToken);
       const result = await apiClient.scanUrl({ url });
       setSiteScan(result);
+      if (tabId != null) {
+        await updateBadgeIcon(result?.verdict ?? null, tabId);
+      }
     } catch (error) {
       console.error('Site scan failed:', error);
       setSiteScan(null);
     } finally {
       setSiteScanLoading(false);
+    }
+  };
+
+  const updateBadgeIcon = async (
+    verdict: 'SAFE' | 'SUSPICIOUS' | 'MALICIOUS' | null,
+    tabId: number
+  ) => {
+    try {
+      const size = 48;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d')!;
+
+      // Draw the base extension icon
+      await new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, size, size);
+          resolve();
+        };
+        img.onerror = reject;
+        img.src = pasteproofIcon;
+      });
+
+      // Overlay an emoji in the bottom-right corner
+      if (verdict) {
+        const emoji = {
+          SAFE: '✅',
+          SUSPICIOUS: '⚠️',
+          MALICIOUS: '⛔',
+        }[verdict];
+        ctx.font = '22px serif';
+        ctx.fillText(emoji, size - 24, size - 1);
+      }
+
+      const imageData = ctx.getImageData(0, 0, size, size);
+      await browser.action.setIcon({
+        imageData: { 48: imageData } as any,
+        tabId,
+      });
+    } catch (error) {
+      console.warn('Failed to update icon:', error);
     }
   };
 
@@ -225,13 +276,10 @@ export default function PopupApp() {
 
   const signIn = async () => {
     try {
-      const authUrl = `${import.meta.env.VITE_WEB_URL}/auth/extension`;
-
       await browser.tabs.create({
-        url: authUrl,
+        url: `${import.meta.env.VITE_WEB_URL}/auth/extension`,
         active: true,
       });
-
       alert(
         'Please sign in on the opened tab. After signing in, reopen this popup to see your authenticated state.'
       );
@@ -239,6 +287,19 @@ export default function PopupApp() {
     } catch (error) {
       console.error('Sign in error:', error);
       alert('Failed to open sign in page');
+    }
+  };
+
+  const signUp = async () => {
+    try {
+      await browser.tabs.create({
+        url: `${import.meta.env.VITE_WEB_URL}/auth/signup`,
+        active: true,
+      });
+      window.close();
+    } catch (error) {
+      console.error('Sign up error:', error);
+      alert('Failed to open sign up page');
     }
   };
 
@@ -260,6 +321,15 @@ export default function PopupApp() {
     setCurrentTeamId(null);
     setTeams([]);
     setSiteScan(null);
+
+    // Reset icon to base (no overlay)
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (tab.id != null) await updateBadgeIcon(null, tab.id);
+    } catch {}
 
     // Refresh the page after signing out
     await refreshCurrentTab();
@@ -322,10 +392,15 @@ export default function PopupApp() {
           );
           if (!deleteResponse.ok) {
             const errorData = await deleteResponse.json().catch(() => ({}));
-            throw new Error(errorData.error || 'Failed to remove from whitelist');
+            throw new Error(
+              errorData.error || 'Failed to remove from whitelist'
+            );
           }
         } else {
-          console.warn('Whitelist entry not found for domain:', normalizedDomain);
+          console.warn(
+            'Whitelist entry not found for domain:',
+            normalizedDomain
+          );
         }
       } else {
         await fetch(`${baseUrl}/v1/whitelist`, {
@@ -380,34 +455,95 @@ export default function PopupApp() {
       </div>
 
       {!state.isAuthenticated && (
-        <div style={styles.authContainer}>
-          <div style={styles.authIcon}>
-            <LockIcon sx={{ fontSize: 36, color: '#ff9800' }} />
-          </div>
-          <p style={styles.authText}>Sign in to unlock Premium features</p>
-          <button
-            onClick={signIn}
+        <div style={styles.unauthContainer}>
+          {/* Basic protection active */}
+          <div
             style={{
-              ...styles.button,
-              ...styles.buttonPrimary,
-              width: 'auto',
-              minWidth: '120px',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.backgroundColor = '#fb8c00';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-              e.currentTarget.style.boxShadow =
-                '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.backgroundColor = '#ff9800';
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow =
-                '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+              ...styles.statusBadge,
+              backgroundColor: '#ecfdf5',
+              marginBottom: '14px',
             }}
           >
-            Sign In
-          </button>
+            <SecurityIcon sx={{ fontSize: 16, color: '#10b981' }} />
+            <span
+              style={{ color: '#065f46', fontWeight: '600', fontSize: '13px' }}
+            >
+              Basic Protection Active
+            </span>
+          </div>
+
+          {/* Upgrade prompt */}
+          <div style={styles.upgradeCard}>
+            <div style={styles.upgradeHeader}>
+              <CardGiftcardIcon sx={{ fontSize: 18, color: '#ff9800' }} />
+              <span style={styles.upgradeTitle}>
+                Sign up free — unlock more
+              </span>
+            </div>
+            <p style={styles.upgradeSubtext}>
+              You're protected by pattern detection, but a free account gives
+              you access to:
+            </p>
+            <ul style={styles.featureList}>
+              {[
+                'Site safety scanning (scam & phishing detection)',
+                'Custom detection patterns',
+                'Trusted sites (whitelist)',
+                'Beta features as they ship',
+              ].map(feature => (
+                <li key={feature} style={styles.featureItem}>
+                  <CheckCircleIcon
+                    sx={{
+                      fontSize: 13,
+                      color: '#10b981',
+                      flexShrink: 0,
+                      marginTop: '1px',
+                    }}
+                  />
+                  <span>{feature}</span>
+                </li>
+              ))}
+            </ul>
+
+            <button
+              onClick={signUp}
+              style={{
+                ...styles.button,
+                ...styles.buttonPrimary,
+                width: '100%',
+                marginBottom: '8px',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = '#fb8c00';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow =
+                  '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = '#ff9800';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow =
+                  '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+              }}
+            >
+              Create Free Account
+            </button>
+
+            <button
+              onClick={signIn}
+              style={styles.link}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = '#f9fafb';
+                e.currentTarget.style.borderColor = '#d1d5db';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'white';
+                e.currentTarget.style.borderColor = '#e5e7eb';
+              }}
+            >
+              Already have an account? Sign in
+            </button>
+          </div>
         </div>
       )}
 
@@ -456,7 +592,13 @@ export default function PopupApp() {
                 <div style={styles.siteSafeBadge}>
                   <VerifiedUserIcon sx={{ fontSize: 16, color: '#065f46' }} />
                   <div>
-                    <div style={{ fontWeight: '600', fontSize: '12px', color: '#065f46' }}>
+                    <div
+                      style={{
+                        fontWeight: '600',
+                        fontSize: '12px',
+                        color: '#065f46',
+                      }}
+                    >
                       Site Verified
                     </div>
                     <div style={{ fontSize: '10px', color: '#047857' }}>
@@ -470,14 +612,32 @@ export default function PopupApp() {
                 <div style={styles.siteSuspiciousBadge}>
                   <WarningAmberIcon sx={{ fontSize: 16, color: '#92400e' }} />
                   <div>
-                    <div style={{ fontWeight: '600', fontSize: '12px', color: '#92400e' }}>
+                    <div
+                      style={{
+                        fontWeight: '600',
+                        fontSize: '12px',
+                        color: '#92400e',
+                      }}
+                    >
                       Site Flagged as Suspicious
                     </div>
-                    <div style={{ fontSize: '10px', color: '#78350f', lineHeight: '1.4' }}>
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        color: '#78350f',
+                        lineHeight: '1.4',
+                      }}
+                    >
                       Proceed with caution — this site may be untrustworthy
                     </div>
                     {siteScan.flags.length > 0 && (
-                      <div style={{ fontSize: '10px', color: '#78350f', marginTop: '4px' }}>
+                      <div
+                        style={{
+                          fontSize: '10px',
+                          color: '#78350f',
+                          marginTop: '4px',
+                        }}
+                      >
                         Flags: {siteScan.flags.join(', ')}
                       </div>
                     )}
@@ -487,16 +647,38 @@ export default function PopupApp() {
 
               {siteScan.verdict === 'MALICIOUS' && (
                 <div style={styles.siteMaliciousBadge}>
-                  <GppBadIcon sx={{ fontSize: 20, color: '#7f1d1d', flexShrink: 0 }} />
+                  <GppBadIcon
+                    sx={{ fontSize: 20, color: '#7f1d1d', flexShrink: 0 }}
+                  />
                   <div>
-                    <div style={{ fontWeight: '700', fontSize: '13px', color: '#7f1d1d', marginBottom: '3px' }}>
+                    <div
+                      style={{
+                        fontWeight: '700',
+                        fontSize: '13px',
+                        color: '#7f1d1d',
+                        marginBottom: '3px',
+                      }}
+                    >
                       Warning: Potential Scam or Phishing Site
                     </div>
-                    <div style={{ fontSize: '11px', color: '#991b1b', lineHeight: '1.4' }}>
-                      This site has been identified as potentially malicious. Avoid entering any personal information.
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        color: '#991b1b',
+                        lineHeight: '1.4',
+                      }}
+                    >
+                      This site has been identified as potentially malicious.
+                      Avoid entering any personal information.
                     </div>
                     {siteScan.flags.length > 0 && (
-                      <div style={{ fontSize: '10px', color: '#b91c1c', marginTop: '5px' }}>
+                      <div
+                        style={{
+                          fontSize: '10px',
+                          color: '#b91c1c',
+                          marginTop: '5px',
+                        }}
+                      >
                         Flags: {siteScan.flags.join(', ')}
                       </div>
                     )}
@@ -986,22 +1168,47 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'all 0.2s ease',
     outline: 'none',
   },
-  authContainer: {
-    textAlign: 'center',
-    padding: '20px 12px',
+  unauthContainer: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
   },
-  authIcon: {
-    marginBottom: '10px',
+  upgradeCard: {
+    backgroundColor: '#fffbf5',
+    border: '1px solid #fed7aa',
+    borderRadius: '8px',
+    padding: '12px',
+  },
+  upgradeHeader: {
     display: 'flex',
-    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '6px',
+    marginBottom: '6px',
   },
-  authText: {
-    color: '#6b7280',
-    marginBottom: '12px',
+  upgradeTitle: {
     fontSize: '13px',
+    fontWeight: '700',
+    color: '#92400e',
+  },
+  upgradeSubtext: {
+    fontSize: '11px',
+    color: '#78350f',
+    margin: '0 0 10px 0',
+    lineHeight: '1.5',
+  },
+  featureList: {
+    listStyle: 'none',
+    margin: '0 0 12px 0',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px',
+  },
+  featureItem: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '6px',
+    fontSize: '11px',
+    color: '#374151',
     lineHeight: '1.4',
   },
 };
