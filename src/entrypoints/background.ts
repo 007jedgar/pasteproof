@@ -103,6 +103,11 @@ function createContextMenu() {
       title: 'Rescan for PII',
       contexts: ['editable'],
     });
+    browser.contextMenus.create({
+      id: 'pasteproof-scan-scams',
+      title: 'Scan for Scams',
+      contexts: ['page', 'selection', 'editable', 'link'],
+    });
   } catch (error) {
     console.error('[Paste Proof] Failed to create context menu:', error);
   }
@@ -190,13 +195,18 @@ export default defineBackground(() => {
   // Handle context menu clicks
   browser.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === 'pasteproof-rescan' && tab?.id) {
-      // Send message to content script to trigger rescan
       browser.tabs
-        .sendMessage(tab.id, {
-          action: 'rescanForPii',
-        })
+        .sendMessage(tab.id, { action: 'rescanForPii' })
         .catch(error => {
           console.error('[Paste Proof] Failed to send rescan message:', error);
+        });
+    }
+
+    if (info.menuItemId === 'pasteproof-scan-scams' && tab?.id) {
+      browser.tabs
+        .sendMessage(tab.id, { action: 'scanForScams' })
+        .catch(error => {
+          console.error('[Paste Proof] Failed to send scan-scams message:', error);
         });
     }
   });

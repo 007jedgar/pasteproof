@@ -7,6 +7,7 @@ import {
   apiCache,
   type Team,
   type SiteScanResult,
+  type PhishingAnalysis,
 } from '@/shared/api-client';
 import LockIcon from '@mui/icons-material/Lock';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -21,12 +22,75 @@ import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import GppBadIcon from '@mui/icons-material/GppBad';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
+import PhishingIcon from '@mui/icons-material/Phishing';
 
 type User = {
   id: string;
   email: string;
   name?: string;
 };
+
+const RISK_COLORS = {
+  critical: { bg: '#fef2f2', border: '#fca5a5', text: '#991b1b', chipBg: '#fee2e2', icon: '🚨', label: 'Scam Detected' },
+  high:     { bg: '#fff7ed', border: '#fed7aa', text: '#92400e', chipBg: '#fef3c7', icon: '⚠️', label: 'Suspicious Message' },
+  medium:   { bg: '#fffbeb', border: '#fde68a', text: '#78350f', chipBg: '#fef9c3', icon: '⚠️', label: 'Potentially Suspicious' },
+  low:      { bg: '#ecfdf5', border: '#a7f3d0', text: '#065f46', chipBg: '#d1fae5', icon: '✅', label: 'No Threats Found' },
+} as const;
+
+function PhishingScanResult({ analysis }: { analysis: PhishingAnalysis }) {
+  const c = RISK_COLORS[analysis.riskLevel as keyof typeof RISK_COLORS] ?? RISK_COLORS.medium;
+  const indicators = analysis.indicators ?? [];
+  return (
+    <div
+      style={{
+        marginTop: '8px',
+        padding: '10px 12px',
+        backgroundColor: c.bg,
+        borderRadius: '6px',
+        border: `1px solid ${c.border}`,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          marginBottom: analysis.aiAnalysis?.recommendation ? '6px' : 0,
+        }}
+      >
+        <span style={{ fontSize: '13px' }}>{c.icon}</span>
+        <span style={{ fontWeight: '600', fontSize: '12px', color: c.text }}>{c.label}</span>
+        <span style={{ fontSize: '10px', color: c.text, marginLeft: 'auto', opacity: 0.8 }}>
+          {analysis.riskScore}/100 · {analysis.confidence}% conf.
+        </span>
+      </div>
+      {analysis.aiAnalysis?.recommendation && (
+        <div style={{ fontSize: '11px', color: c.text, lineHeight: 1.45, marginBottom: indicators.length ? '6px' : 0 }}>
+          {analysis.aiAnalysis.recommendation}
+        </div>
+      )}
+      {indicators.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          {indicators.slice(0, 4).map((ind, i) => (
+            <span
+              key={i}
+              title={ind.description}
+              style={{
+                fontSize: '10px',
+                backgroundColor: c.chipBg,
+                color: c.text,
+                padding: '2px 7px',
+                borderRadius: '10px',
+              }}
+            >
+              {ind.type.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type PopupState = {
   isAuthenticated: boolean;
@@ -54,6 +118,9 @@ export default function PopupApp() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [siteScan, setSiteScan] = useState<SiteScanResult | null>(null);
   const [siteScanLoading, setSiteScanLoading] = useState(false);
+  const [phishingScan, setPhishingScan] = useState<PhishingAnalysis | null>(null);
+  const [phishingScanLoading, setPhishingScanLoading] = useState(false);
+  const [phishingScanError, setPhishingScanError] = useState<string | null>(null);
 
   useEffect(() => {
     loadState();
@@ -214,6 +281,42 @@ export default function PopupApp() {
       setSiteScan(null);
     } finally {
       setSiteScanLoading(false);
+    }
+  };
+
+  const scanForScams = async () => {
+    setPhishingScan(null);
+    setPhishingScanError(null);
+    setPhishingScanLoading(true);
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (!tab.id) {
+        setPhishingScanError('No active tab found.');
+        return;
+      }
+      let response: { result: PhishingAnalysis | null } | undefined;
+      try {
+        response = await browser.tabs.sendMessage(tab.id, {
+          action: 'scanForScams',
+        });
+      } catch {
+        setPhishingScanError(
+          'Could not reach the page. Try reloading the tab first.'
+        );
+        return;
+      }
+      setPhishingScan(response?.result ?? null);
+      if (!response?.result) {
+        setPhishingScanError('No content found to scan on this page.');
+      }
+    } catch (error) {
+      console.error('Scan for scams failed:', error);
+      setPhishingScanError('Scan failed. Please try again.');
+    } finally {
+      setPhishingScanLoading(false);
     }
   };
 
@@ -687,6 +790,57 @@ export default function PopupApp() {
               )}
             </>
           )}
+
+          {/* Scan for Scams */}
+          <div style={{ marginBottom: '12px' }}>
+            <button
+              onClick={scanForScams}
+              disabled={phishingScanLoading}
+              style={{
+                ...styles.button,
+                width: '100%',
+                backgroundColor: '#1e3a5f',
+                color: 'white',
+                opacity: phishingScanLoading ? 0.7 : 1,
+                cursor: phishingScanLoading ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={e => {
+                if (!phishingScanLoading) {
+                  e.currentTarget.style.backgroundColor = '#16304f';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = '#1e3a5f';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <PhishingIcon
+                sx={{ fontSize: 14, marginRight: '5px', verticalAlign: 'middle' }}
+              />
+              {phishingScanLoading ? 'Scanning messages…' : 'Scan for Scams'}
+            </button>
+
+            {phishingScanError && !phishingScan && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  padding: '9px 12px',
+                  backgroundColor: '#fafafa',
+                  borderRadius: '6px',
+                  border: '1px solid #e5e7eb',
+                  fontSize: '11px',
+                  color: '#6b7280',
+                }}
+              >
+                {phishingScanError}
+              </div>
+            )}
+
+            {phishingScan && (
+              <PhishingScanResult analysis={phishingScan} />
+            )}
+          </div>
 
           {/* Team Selector */}
           {teams.length > 0 && (

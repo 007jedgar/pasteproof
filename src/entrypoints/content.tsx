@@ -13,7 +13,8 @@ import {
   type SiteScanResult,
   type DataPolicyValidateResult,
 } from '@/shared/api-client';
-import { SimpleWarningBadge, SiteSafetyWarning, DataPolicyWarning, DataPolicyInfoBadge } from '@/shared/components';
+import { SimpleWarningBadge, SiteSafetyWarning, DataPolicyWarning, DataPolicyInfoBadge, PhishingWarning } from '@/shared/components';
+import type { PhishingAnalysis } from '@/shared/api-client';
 import { aiScanOptimizer } from '@/shared/ai-scan-optimizer';
 import { siteScanOptimizer } from '@/shared/site-scan-optimizer';
 import { startAiScan, completeAiScan, failAiScan } from '@/shared/ai-scan-state';
@@ -269,6 +270,10 @@ export default defineContentScript({
     let siteScanResult: SiteScanResult | null = null;
     let siteScanInProgress = false;
     let siteScanDismissed = false; // User chose to proceed despite warning
+
+    // Phishing / scam scan overlay state
+    let phishingWarningContainer: HTMLDivElement | null = null;
+    let phishingWarningRoot: Root | null = null;
 
     // Data policy upload validation state
     let dataPolicyContainer: HTMLDivElement | null = null;
@@ -2161,12 +2166,121 @@ export default defineContentScript({
       }
     });
 
-    // Listen for context menu action from background script
-    browser.runtime.onMessage.addListener(message => {
-      if (message.action === 'rescanForPii') {
-        manualRescan();
+    // Extract message/email content from the current page.
+    // Gmail is supported first; other platforms can be added here later.
+    const extractPageMessageContent = (): string | null => {
+      const host = window.location.hostname;
+
+      if (host.includes('mail.google.com')) {
+        // Prefer the currently expanded email body
+        const bodyEl =
+          document.querySelector<HTMLElement>('.ii.gt') ||
+          document.querySelector<HTMLElement>('.a3s.aiL');
+        if (!bodyEl) return null;
+
+        const subject =
+          document.querySelector<HTMLElement>('.hP')?.innerText?.trim() || '';
+        const senderEl = document.querySelector<HTMLElement>('.gD, .yP');
+        const sender =
+          senderEl?.getAttribute('email') ||
+          senderEl?.innerText?.trim() ||
+          '';
+        const body = bodyEl.innerText?.trim() || '';
+
+        return [
+          subject ? `Subject: ${subject}` : '',
+          sender ? `From: ${sender}` : '',
+          body,
+        ]
+          .filter(Boolean)
+          .join('\n')
+          .substring(0, 10000);
       }
-    });
+
+      // Fallback: first 10 000 chars of visible page text
+      return document.body?.innerText?.substring(0, 10000) || null;
+    };
+
+    const removePhishingWarning = () => {
+      if (phishingWarningRoot) {
+        phishingWarningRoot.unmount();
+        phishingWarningRoot = null;
+      }
+      if (phishingWarningContainer) {
+        phishingWarningContainer.remove();
+        phishingWarningContainer = null;
+      }
+    };
+
+    const showPhishingWarning = (analysis: PhishingAnalysis) => {
+      removePhishingWarning();
+      phishingWarningContainer = document.createElement('div');
+      phishingWarningContainer.id = 'pasteproof-phishing-warning';
+      document.body.appendChild(phishingWarningContainer);
+      phishingWarningRoot = ReactDOM.createRoot(phishingWarningContainer);
+      phishingWarningRoot.render(
+        <PhishingWarning
+          analysis={analysis}
+          onDismiss={removePhishingWarning}
+        />
+      );
+    };
+
+    const performPhishingDetect =
+      async (): Promise<PhishingAnalysis | null> => {
+        const text = extractPageMessageContent();
+        if (!text) return null;
+
+        const apiClient = getApiClient();
+        if (!apiClient) return null;
+
+        return apiClient.detectPhishing({
+          message: { text },
+          userContext: {},
+          platformContext: {
+            marketplaceType: window.location.hostname.includes(
+              'mail.google.com'
+            )
+              ? 'generic'
+              : 'generic',
+          },
+          metadata: { userAgent: navigator.userAgent },
+        });
+      };
+
+    // Listen for context menu action from background script
+    type ContentMessage =
+      | { action: 'rescanForPii' }
+      | { action: 'scanForScams' };
+
+    type ScamScanResponse = { result: PhishingAnalysis | null };
+
+    browser.runtime.onMessage.addListener(
+      (
+        message: ContentMessage,
+        _sender: Browser.runtime.MessageSender,
+        sendResponse: (response: ScamScanResponse) => void
+      ) => {
+        if (message.action === 'rescanForPii') {
+          manualRescan();
+        }
+
+        if (message.action === 'scanForScams') {
+          performPhishingDetect()
+            .then(result => {
+              sendResponse({ result });
+              if (result) {
+                showPhishingWarning(result);
+              }
+            })
+            .catch(err => {
+              console.error('[PasteProof] Phishing scan failed:', err);
+              sendResponse({ result: null });
+            });
+          return true; // keep channel open for async sendResponse
+        }
+      }
+    );
 
     document.addEventListener(
       'focusin',

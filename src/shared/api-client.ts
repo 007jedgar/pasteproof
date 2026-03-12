@@ -119,6 +119,80 @@ export type TeamPolicy = {
   updated_at: number | string;
 };
 
+export type PhishingDetectRequest = {
+  message: {
+    text: string;
+    senderId?: string;
+    timestamp?: string;
+    messageId?: string;
+  };
+  conversationHistory?: Array<{
+    role: 'buyer' | 'seller' | 'system';
+    text: string;
+    timestamp?: string;
+  }>;
+  userContext: {
+    accountAgeDays?: number;
+    location?: string;
+    purchaseHistory?: number;
+    accountVerification?: string;
+    behaviorFlags?: string[];
+  };
+  senderContext?: {
+    accountAgeDays?: number;
+    reputationScore?: number;
+    recentActivity?: string;
+  };
+  platformContext?: {
+    marketplaceType: 'discogs' | 'mercari' | 'ebay' | 'generic';
+    listingId?: string;
+    transactionId?: string;
+    category?: string;
+  };
+  metadata?: {
+    sessionId?: string;
+    userAgent?: string;
+  };
+};
+
+export type PhishingIndicator = {
+  type: string;
+  severity: string;
+  confidence: number;
+  description: string;
+};
+
+export type PhishingSuspiciousPhrase = {
+  phrase: string;
+  reason: string;
+};
+
+export type PhishingRecommendedAction = {
+  action: string;
+  priority: string;
+  reason: string;
+};
+
+export type PhishingAnalysis = {
+  riskScore: number;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  confidence: number;
+  indicators: PhishingIndicator[];
+  patternMatches: {
+    suspiciousUrls: string[];
+    keywords: string[];
+  };
+  aiAnalysis: {
+    intent: string;
+    urgency: string;
+    suspiciousPhrases: PhishingSuspiciousPhrase[];
+    overallTone: string;
+    recommendation: string;
+  };
+  behavioralFlags: string[];
+  recommendedActions: PhishingRecommendedAction[];
+};
+
 export type DataPolicyViolation = {
   policy_id: string;
   policy_name: string;
@@ -840,6 +914,25 @@ export class PasteProofApiClient {
     } catch (error) {
       console.warn('Failed to delete data policy:', error);
       return false;
+    }
+  }
+
+  // Phishing / scam detection for chat messages
+  async detectPhishing(
+    request: PhishingDetectRequest
+  ): Promise<PhishingAnalysis | null> {
+    try {
+      const data = await this.fetch<{
+        success: boolean;
+        analysis: PhishingAnalysis;
+      }>('/v1/phishing/detect', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      });
+      return data.analysis;
+    } catch (error) {
+      console.warn('Phishing detection failed:', error);
+      return null;
     }
   }
 
