@@ -2172,32 +2172,34 @@ export default defineContentScript({
       const host = window.location.hostname;
 
       if (host.includes('mail.google.com')) {
-        // Prefer the currently expanded email body
+        // Try to extract the currently open email body with structured context
         const bodyEl =
           document.querySelector<HTMLElement>('.ii.gt') ||
           document.querySelector<HTMLElement>('.a3s.aiL');
-        if (!bodyEl) return null;
 
-        const subject =
-          document.querySelector<HTMLElement>('.hP')?.innerText?.trim() || '';
-        const senderEl = document.querySelector<HTMLElement>('.gD, .yP');
-        const sender =
-          senderEl?.getAttribute('email') ||
-          senderEl?.innerText?.trim() ||
-          '';
-        const body = bodyEl.innerText?.trim() || '';
+        if (bodyEl) {
+          const subject =
+            document.querySelector<HTMLElement>('.hP')?.innerText?.trim() || '';
+          const senderEl = document.querySelector<HTMLElement>('.gD, .yP');
+          const sender =
+            senderEl?.getAttribute('email') ||
+            senderEl?.innerText?.trim() ||
+            '';
+          const body = bodyEl.innerText?.trim() || '';
 
-        return [
-          subject ? `Subject: ${subject}` : '',
-          sender ? `From: ${sender}` : '',
-          body,
-        ]
-          .filter(Boolean)
-          .join('\n')
-          .substring(0, 10000);
+          return [
+            subject ? `Subject: ${subject}` : '',
+            sender ? `From: ${sender}` : '',
+            body,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .substring(0, 10000);
+        }
+        // No open email (inbox list, compose, settings) — fall through to generic
       }
 
-      // Fallback: first 10 000 chars of visible page text
+      // Generic fallback: first 10 000 chars of visible page text
       return document.body?.innerText?.substring(0, 10000) || null;
     };
 
@@ -2226,40 +2228,43 @@ export default defineContentScript({
       );
     };
 
-    const performPhishingDetect =
-      async (): Promise<PhishingAnalysis | null> => {
-        const text = extractPageMessageContent();
-        if (!text) return null;
+    type ScamScanError = 'unauthenticated' | 'no_content' | 'api_error';
+    type ScamScanResult =
+      | { result: PhishingAnalysis; error?: never }
+      | { result: null; error: ScamScanError };
 
-        const apiClient = getApiClient();
-        if (!apiClient) return null;
+    const performPhishingDetect = async (): Promise<ScamScanResult> => {
+      const text = extractPageMessageContent();
+      if (!text) return { result: null, error: 'no_content' };
 
-        return apiClient.detectPhishing({
+      const apiClient = getApiClient();
+      if (!apiClient) return { result: null, error: 'unauthenticated' };
+
+      try {
+        const result = await apiClient.detectPhishing({
           message: { text },
           userContext: {},
-          platformContext: {
-            marketplaceType: window.location.hostname.includes(
-              'mail.google.com'
-            )
-              ? 'generic'
-              : 'generic',
-          },
+          platformContext: { marketplaceType: 'generic' },
           metadata: { userAgent: navigator.userAgent },
         });
-      };
+        return result
+          ? { result }
+          : { result: null, error: 'api_error' };
+      } catch {
+        return { result: null, error: 'api_error' };
+      }
+    };
 
     // Listen for context menu action from background script
     type ContentMessage =
       | { action: 'rescanForPii' }
       | { action: 'scanForScams' };
 
-    type ScamScanResponse = { result: PhishingAnalysis | null };
-
     browser.runtime.onMessage.addListener(
       (
         message: ContentMessage,
         _sender: Browser.runtime.MessageSender,
-        sendResponse: (response: ScamScanResponse) => void
+        sendResponse: (response: ScamScanResult) => void
       ) => {
         if (message.action === 'rescanForPii') {
           manualRescan();
@@ -2267,15 +2272,15 @@ export default defineContentScript({
 
         if (message.action === 'scanForScams') {
           performPhishingDetect()
-            .then(result => {
-              sendResponse({ result });
-              if (result) {
-                showPhishingWarning(result);
+            .then(scanResult => {
+              sendResponse(scanResult);
+              if (scanResult.result) {
+                showPhishingWarning(scanResult.result);
               }
             })
             .catch(err => {
               console.error('[PasteProof] Phishing scan failed:', err);
-              sendResponse({ result: null });
+              sendResponse({ result: null, error: 'api_error' });
             });
           return true; // keep channel open for async sendResponse
         }

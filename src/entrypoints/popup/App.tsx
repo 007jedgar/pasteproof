@@ -297,7 +297,8 @@ export default function PopupApp() {
         setPhishingScanError('No active tab found.');
         return;
       }
-      let response: { result: PhishingAnalysis | null } | undefined;
+      type ScanResponse = { result: PhishingAnalysis | null; error?: string };
+      let response: ScanResponse | undefined;
       try {
         response = await browser.tabs.sendMessage(tab.id, {
           action: 'scanForScams',
@@ -310,7 +311,13 @@ export default function PopupApp() {
       }
       setPhishingScan(response?.result ?? null);
       if (!response?.result) {
-        setPhishingScanError('No content found to scan on this page.');
+        if (response?.error === 'unauthenticated') {
+          setPhishingScanError('Sign in to use Scam Scan.');
+        } else if (response?.error === 'no_content') {
+          setPhishingScanError('No content found to scan on this page.');
+        } else {
+          setPhishingScanError('Scan failed. Please try again.');
+        }
       }
     } catch (error) {
       console.error('Scan for scams failed:', error);
