@@ -338,14 +338,7 @@ export default defineContentScript({
 
     // Site safety scan functions
     const performSiteSafetyScan = async (): Promise<SiteScanResult | null> => {
-      console.log('[Site Safety] performSiteSafetyScan called', {
-        siteScanInProgress,
-        siteScanDismissed,
-        url: window.location.href,
-      });
-
       if (siteScanInProgress || siteScanDismissed) {
-        console.log('[Site Safety] Skipping scan - already in progress or dismissed');
         return null;
       }
 
@@ -354,7 +347,6 @@ export default defineContentScript({
       // Check cache first
       const cachedResult = siteScanOptimizer.getCachedResult(currentUrl);
       if (cachedResult) {
-        console.log('[Site Safety] Returning cached result:', cachedResult);
         return cachedResult;
       }
 
@@ -387,8 +379,6 @@ export default defineContentScript({
           meta.visible_text_snippet = visibleText;
         }
 
-        console.log('[Site Safety] Calling API to scan URL:', currentUrl);
-        
         // Call the scan endpoint directly (no auth required)
         const response = await fetch(`${import.meta.env.VITE_API_URL}/v1/scan`, {
           method: 'POST',
@@ -407,8 +397,6 @@ export default defineContentScript({
         }
 
         const result = await response.json();
-
-        console.log('[Site Safety] Scan result received:', result);
 
         // Cache the result
         siteScanOptimizer.cacheResult(currentUrl, result);
@@ -469,25 +457,17 @@ export default defineContentScript({
 
     // Trigger site safety scan on first form interaction
     const checkSiteSafety = async () => {
-      console.log('[Site Safety] checkSiteSafety called', {
-        siteScanDismissed,
-        siteScanResult,
-      });
-
       if (siteScanDismissed || siteScanResult) {
-        console.log('[Site Safety] Skipping check - already dismissed or result exists');
         return;
       }
 
       const result = await performSiteSafetyScan();
 
-      console.log('[Site Safety] Check complete, verdict:', result?.verdict);
-
-      if (result && (result.verdict === 'MALICIOUS' || result.verdict === 'SUSPICIOUS')) {
-        console.log('[Site Safety] Showing warning for', result.verdict, 'site');
-        showSiteSafetyWarning(result);
-      } else if (result) {
-        console.log('[Site Safety] Site is SAFE - no warning needed');
+      if (result) {
+        siteScanResult = result;
+        if (result.verdict === 'MALICIOUS' || result.verdict === 'SUSPICIOUS') {
+          showSiteSafetyWarning(result);
+        }
       }
     };
 
