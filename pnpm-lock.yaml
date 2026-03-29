@@ -38,7 +38,7 @@ importers:
         version: 19.2.0(@types/react@19.2.0)
       '@wxt-dev/browser':
         specifier: ''
-        version: 0.1.4
+        version: 0.1.38
       '@wxt-dev/module-react':
         specifier: ^1.1.3
         version: 1.1.5(vite@7.2.7(@types/node@24.6.2)(jiti@2.6.1))(wxt@0.20.11(@types/node@24.6.2)(jiti@2.6.1)(rollup@4.52.4))
@@ -1243,8 +1243,8 @@ packages:
   '@webext-core/match-patterns@1.0.3':
     resolution: {integrity: sha512-NY39ACqCxdKBmHgw361M9pfJma8e4AZo20w9AY+5ZjIj1W2dvXC8J31G5fjfOGbulW9w4WKpT8fPooi0mLkn9A==}
 
-  '@wxt-dev/browser@0.1.4':
-    resolution: {integrity: sha512-9x03I15i79XU8qYwjv4le0K2HdMl/Yga2wUBSoUbcrCnamv8P3nvuYxREQ9C5QY/qPAfeEVdAtaTrS3KWak71g==}
+  '@wxt-dev/browser@0.1.38':
+    resolution: {integrity: sha512-Y9nUfNOMqgsoO8KQ1BssrwzHEmrSr/2pUowAG4Wcr9EyKyhOK7mC7Vdyj2kXAmp5NOUXHjhghzJ6qIb5h+RbCA==}
 
   '@wxt-dev/module-react@1.1.5':
     resolution: {integrity: sha512-KgsUrsgH5rBT8MwiipnDEOHBXmLvTIdFICrI7KjngqSf9DpVRn92HsKmToxY0AYpkP19hHWta2oNYFTzmmm++g==}
@@ -2402,8 +2402,8 @@ packages:
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
 
-  node-forge@1.3.3:
-    resolution: {integrity: sha512-rLvcdSyRCyouf6jcOIPe/BgwG/d7hKjzMKOas33/pHEr6gbq18IK9zV7DiPvzsz0oBJPme6qr6H6kGZuI9/DZg==}
+  node-forge@1.4.0:
+    resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
     engines: {node: '>= 6.13.0'}
 
   node-notifier@10.0.1:
@@ -2546,12 +2546,12 @@ packages:
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
-  picomatch@2.3.1:
-    resolution: {integrity: sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==}
+  picomatch@2.3.2:
+    resolution: {integrity: sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA==}
     engines: {node: '>=8.6'}
 
-  picomatch@4.0.3:
-    resolution: {integrity: sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==}
+  picomatch@4.0.4:
+    resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
 
   pino-abstract-transport@2.0.0:
@@ -3173,6 +3173,7 @@ packages:
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
+    deprecated: Use @exodus/bytes instead for a more spec-conformant and faster implementation
 
   whatwg-mimetype@4.0.0:
     resolution: {integrity: sha512-QaKxh0eNIi2mE9p2vEdzfagOKHCcj1pJ56EEHGQOVxp8r9/iszLUUV7v89x9O1p/T+NlTM5W7jW6+cz4Fq1YVg==}
@@ -3297,8 +3298,8 @@ packages:
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
-  yaml@1.10.2:
-    resolution: {integrity: sha512-r3vXyErRCYJ7wg28yvBY5VSoAF8ZvlcW9/BwUzEtUsjvX/DKs24dIkuwjtuprwJJHsbyUbLApepYTR1BN4uHrg==}
+  yaml@1.10.3:
+    resolution: {integrity: sha512-vIYeF1u3CjlhAFekPPAk2h/Kv4T3mAkMox5OymRiJQB0spDP10LHvt+K7G9Ny6NuuMAb25/6n1qyUjAcGNf/AA==}
     engines: {node: '>= 6'}
 
   yargs-parser@20.2.9:
@@ -3349,7 +3350,7 @@ snapshots:
   '@aklinker1/rollup-plugin-visualizer@5.12.0(rollup@4.52.4)':
     dependencies:
       open: 8.4.2
-      picomatch: 2.3.1
+      picomatch: 2.3.2
       source-map: 0.7.6
       yargs: 17.7.2
     optionalDependencies:
@@ -3570,7 +3571,7 @@ snapshots:
       bluebird: 3.7.2
       commander: 9.5.0
       debug: 4.3.7
-      node-forge: 1.3.3
+      node-forge: 1.4.0
       split: 1.0.1
     transitivePeerDependencies:
       - supports-color
@@ -4398,7 +4399,7 @@ snapshots:
 
   '@webext-core/match-patterns@1.0.3': {}
 
-  '@wxt-dev/browser@0.1.4':
+  '@wxt-dev/browser@0.1.38':
     dependencies:
       '@types/filesystem': 0.0.36
       '@types/har-format': 1.2.16
@@ -4413,7 +4414,7 @@ snapshots:
 
   '@wxt-dev/storage@1.2.0':
     dependencies:
-      '@wxt-dev/browser': 0.1.4
+      '@wxt-dev/browser': 0.1.38
       async-mutex: 0.5.0
       dequal: 2.0.3
 
@@ -4724,7 +4725,7 @@ snapshots:
       import-fresh: 3.3.1
       parse-json: 5.2.0
       path-type: 4.0.0
-      yaml: 1.10.2
+      yaml: 1.10.3
 
   cross-spawn@7.0.6:
     dependencies:
@@ -5052,9 +5053,9 @@ snapshots:
     dependencies:
       pend: 1.2.0
 
-  fdir@6.5.0(picomatch@4.0.3):
+  fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
-      picomatch: 4.0.3
+      picomatch: 4.0.4
 
   file-entry-cache@8.0.0:
     dependencies:
@@ -5493,7 +5494,7 @@ snapshots:
   micromatch@4.0.8:
     dependencies:
       braces: 3.0.3
-      picomatch: 2.3.1
+      picomatch: 2.3.2
 
   mime@3.0.0: {}
 
@@ -5563,7 +5564,7 @@ snapshots:
 
   node-fetch-native@1.6.7: {}
 
-  node-forge@1.3.3: {}
+  node-forge@1.4.0: {}
 
   node-notifier@10.0.1:
     dependencies:
@@ -5730,9 +5731,9 @@ snapshots:
 
   picocolors@1.1.1: {}
 
-  picomatch@2.3.1: {}
+  picomatch@2.3.2: {}
 
-  picomatch@4.0.3: {}
+  picomatch@4.0.4: {}
 
   pino-abstract-transport@2.0.0:
     dependencies:
@@ -6161,8 +6162,8 @@ snapshots:
 
   tinyglobby@0.2.15:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.3)
-      picomatch: 4.0.3
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
 
   tinypool@1.1.1: {}
 
@@ -6244,7 +6245,7 @@ snapshots:
       magic-string: 0.30.19
       mlly: 1.8.0
       pathe: 2.0.3
-      picomatch: 4.0.3
+      picomatch: 4.0.4
       pkg-types: 2.3.0
       scule: 1.3.0
       strip-literal: 3.1.0
@@ -6257,13 +6258,13 @@ snapshots:
   unplugin-utils@0.3.0:
     dependencies:
       pathe: 2.0.3
-      picomatch: 4.0.3
+      picomatch: 4.0.4
 
   unplugin@2.3.10:
     dependencies:
       '@jridgewell/remapping': 2.3.5
       acorn: 8.15.0
-      picomatch: 4.0.3
+      picomatch: 4.0.4
       webpack-virtual-modules: 0.6.2
 
   update-browserslist-db@1.1.3(browserslist@4.26.3):
@@ -6317,8 +6318,8 @@ snapshots:
   vite@7.2.7(@types/node@24.6.2)(jiti@2.6.1):
     dependencies:
       esbuild: 0.25.10
-      fdir: 6.5.0(picomatch@4.0.3)
-      picomatch: 4.0.3
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
       postcss: 8.5.6
       rollup: 4.52.4
       tinyglobby: 0.2.15
@@ -6342,7 +6343,7 @@ snapshots:
       expect-type: 1.2.2
       magic-string: 0.30.19
       pathe: 2.0.3
-      picomatch: 4.0.3
+      picomatch: 4.0.4
       std-env: 3.9.0
       tinybench: 2.9.0
       tinyexec: 0.3.2
@@ -6501,7 +6502,7 @@ snapshots:
       '@webext-core/fake-browser': 1.3.2
       '@webext-core/isolated-element': 1.1.2
       '@webext-core/match-patterns': 1.0.3
-      '@wxt-dev/browser': 0.1.4
+      '@wxt-dev/browser': 0.1.38
       '@wxt-dev/storage': 1.2.0
       async-mutex: 0.5.0
       c12: 3.3.0(magicast@0.3.5)
@@ -6574,7 +6575,7 @@ snapshots:
 
   yallist@3.1.1: {}
 
-  yaml@1.10.2: {}
+  yaml@1.10.3: {}
 
   yargs-parser@20.2.9: {}
 
